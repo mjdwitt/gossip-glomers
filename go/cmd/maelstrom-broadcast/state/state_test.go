@@ -9,18 +9,18 @@ import (
 
 func TestState(t *testing.T) {
 	t.Run("empty store can be read", func(t *testing.T) {
-		assert.Equal(t, NewState().Read(), []int32{})
+		assert.Equal(t, New().Read(), []int32{})
 	})
 
 	t.Run("one append can be read", func(t *testing.T) {
-		s := NewState()
+		s := New()
 		defer s.Close()
 		s.Append(1)
 		assert.Equal(t, s.Read(), []int32{1})
 	})
 
 	t.Run("many serial appends can be read", func(t *testing.T) {
-		s := NewState()
+		s := New()
 		defer s.Close()
 
 		for _, n := range []int32{1, 2, 3, 4, 5} {
@@ -31,13 +31,13 @@ func TestState(t *testing.T) {
 	})
 
 	t.Run("append after close fails", func(t *testing.T) {
-		s := NewState()
+		s := New()
 		s.Close()
 		assert.Panics(t, func() { s.Append(1) })
 	})
 
 	t.Run("concurrent appends can be read", func(t *testing.T) {
-		s := NewState()
+		s := New()
 		defer s.Close()
 
 		limit := int32(4_000)

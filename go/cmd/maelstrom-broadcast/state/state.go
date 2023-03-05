@@ -15,8 +15,8 @@ type State struct {
 	closed  chan struct{}
 }
 
-// NewState returns a State
-func NewState() *State {
+// New returns a State
+func New() *State {
 	s := &State{
 		store:   make([]int32, 0),
 		input:   make(chan event),

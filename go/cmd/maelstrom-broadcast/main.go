@@ -13,8 +13,8 @@ import (
 )
 
 func main() {
-	s := state.NewState()
-	defer s.Close()
+	state := state.New()
+	defer state.Close()
 
 	node := maelstrom.NewNode()
 
@@ -24,7 +24,7 @@ func main() {
 			return err
 		}
 
-		s.Append(req.Message)
+		state.Append(req.Message)
 		return node.Reply(msg, &broadcast.Response{})
 	})
 
@@ -34,7 +34,7 @@ func main() {
 			return err
 		}
 
-		return node.Reply(msg, &read.Response{Messages: s.Read()})
+		return node.Reply(msg, &read.Response{Messages: state.Read()})
 	})
 
 	node.Handle("topology", func(msg maelstrom.Message) error {
