@@ -1,4 +1,4 @@
-module gloomers
+module glomers
 
 go 1.20
 

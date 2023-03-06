@@ -3,9 +3,9 @@ package main
 import (
 	"encoding/json"
 
-	"gloomers/cmd/maelstrom-broadcast/network"
-	"gloomers/cmd/maelstrom-broadcast/state"
-	"gloomers/proc"
+	"glomers/cmd/maelstrom-broadcast/network"
+	"glomers/cmd/maelstrom-broadcast/state"
+	"glomers/proc"
 
 	maelstrom "github.com/jepsen-io/maelstrom/demo/go"
 )

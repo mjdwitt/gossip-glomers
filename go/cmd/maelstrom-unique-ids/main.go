@@ -1,7 +1,7 @@
 package main
 
 import (
-	"gloomers/proc"
+	"glomers/proc"
 
 	"github.com/google/uuid"
 	maelstrom "github.com/jepsen-io/maelstrom/demo/go"
