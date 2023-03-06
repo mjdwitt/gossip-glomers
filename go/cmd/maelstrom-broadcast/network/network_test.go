@@ -7,29 +7,13 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestNetworkSetTopology(t *testing.T) {
-	t.Run("sets topology map", func(t *testing.T) {
-		net := New(nil)
-		assert.Nil(t, net.topology)
-
-		top := map[string][]string{
-			"n1": {"n2", "n4"},
-			"n2": {"n1", "n3"},
-			"n3": {"n2"},
-			"n4": {"n1"},
-		}
-		net.SetTopology(top)
-		assert.Equal(t, net.topology, top)
-	})
-}
-
 func TestNetworkMessageNode(t *testing.T) {
 	t.Run("we can spy on sent messages", func(t *testing.T) {
 		ready := make(chan struct{})
 		close(ready)
 
 		sent := make(chan message, 1)
-		node := &mockNode{"n1", sent}
+		node := &mockNode{"n1", []string{"n1"}, sent}
 
 		net := &Network{ready: ready, node: node}
 
@@ -44,9 +28,9 @@ func TestNetworkMessageNode(t *testing.T) {
 		}
 	})
 
-	t.Run("blocks until topology is set", func(t *testing.T) {
+	t.Run("blocks until network initialized", func(t *testing.T) {
 		sent := make(chan message)
-		node := &mockNode{"n1", sent}
+		node := &mockNode{"n1", []string{"n1"}, sent}
 		net := New(node)
 
 		errs := make(chan error)
@@ -65,7 +49,7 @@ func TestNetworkMessageNode(t *testing.T) {
 		default:
 		}
 
-		net.SetTopology(make(map[string][]string))
+		net.Init()
 		assert.Equal(t, <-sent, message{"dest", "body"})
 		assert.NoError(t, <-errs)
 	})
@@ -73,16 +57,11 @@ func TestNetworkMessageNode(t *testing.T) {
 
 func TestNetworkMessageAll(t *testing.T) {
 	t.Run("sends message to every other node in topology", func(t *testing.T) {
-		topology := map[string][]string{
-			"n1": {"n2", "n3"},
-			"n2": {"n1", "n4"},
-			"n3": {"n1"},
-			"n4": {"n2"},
-		}
-		sent := make(chan message, len(topology))
-		node := &mockNode{"n1", sent}
+		nodes := []string{"n1", "n2", "n3", "n4"}
+		sent := make(chan message, len(nodes))
+		node := &mockNode{"n1", nodes, sent}
 		net := New(node)
-		net.SetTopology(topology)
+		net.Init()
 
 		assert.NoError(t, net.MessageAll("body"))
 		close(sent)
@@ -102,6 +81,7 @@ type message struct {
 
 type mockNode struct {
 	id   string
+	ids  []string
 	send chan<- message
 }
 
@@ -109,6 +89,13 @@ type mockNode struct {
 // has been received.
 func (m *mockNode) ID() string {
 	return m.id
+}
+
+// NodeIDs returns a list of all node IDs in the cluster. This list include
+// the local node ID and is the same order across all nodes. Only valid after
+// "init" message has been received.
+func (m *mockNode) NodeIDs() []string {
+	return m.ids
 }
 
 // RPC sends an async RPC request. Handler invoked when response message

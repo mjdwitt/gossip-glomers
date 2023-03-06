@@ -9,6 +9,10 @@ type Node interface {
 	// ID returns the identifier for this node. Only valid after "init" message
 	// has been received.
 	ID() string
+	// NodeIDs returns a list of all node IDs in the cluster. This list include
+	// the local node ID and is the same order across all nodes. Only valid after
+	// "init" message has been received.
+	NodeIDs() []string
 	// RPC sends an async RPC request. Handler invoked when response message
 	// received.
 	RPC(dest string, body any, handler maelstrom.HandlerFunc) error
@@ -20,9 +24,8 @@ type Node interface {
 // Network provides methods by which a node may know of and communicate with its
 // neighbors.
 type Network struct {
-	topology map[string][]string
-	ready    chan struct{}
-	node     Node
+	ready chan struct{}
+	node  Node
 }
 
 // New returns a new Network.
@@ -33,10 +36,9 @@ func New(node Node) *Network {
 	}
 }
 
-// SetTopology sets the network topology, enabling communicating with neighbors.
-func (n *Network) SetTopology(topology map[string][]string) {
+// Init brings the network up.
+func (n *Network) Init() {
 	close(n.ready)
-	n.topology = topology
 }
 
 // MessageNode sends marshals a message to JSON and sends it to a named node.
@@ -47,7 +49,7 @@ func (n *Network) MessageNode(node string, body any) error {
 
 // MessageAll sends a message to every node in the network.
 func (n *Network) MessageAll(body any) error {
-	for node := range n.topology {
+	for _, node := range n.node.NodeIDs() {
 		if node == n.node.ID() {
 			continue
 		}

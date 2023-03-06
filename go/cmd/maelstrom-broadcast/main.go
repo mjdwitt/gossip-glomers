@@ -17,6 +17,11 @@ func main() {
 	node := maelstrom.NewNode()
 	net := network.New(node)
 
+	node.Handle("init", func(maelstrom.Message) error {
+		net.Init()
+		return nil
+	})
+
 	node.Handle("broadcast", func(msg maelstrom.Message) error {
 		var req broadcastRequest
 		if err := json.Unmarshal(msg.Body, &req); err != nil {
@@ -55,7 +60,6 @@ func main() {
 			return err
 		}
 
-		net.SetTopology(req.Topology)
 		return node.Reply(msg, &topologyResponse{})
 	})
 
