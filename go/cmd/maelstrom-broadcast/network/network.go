@@ -5,6 +5,7 @@ import (
 	"log"
 
 	maelstrom "github.com/jepsen-io/maelstrom/demo/go"
+	"golang.org/x/sync/errgroup"
 )
 
 // Node describes the methods that Network uses to communicate with other nodes.
@@ -61,15 +62,15 @@ func (n *Network) MessageNode(node string, body any) error {
 
 // MessageAll sends a message to every node in the network.
 func (n *Network) MessageAll(body any) error {
+	group := &errgroup.Group{}
 	for _, node := range n.node.NodeIDs() {
 		if node == n.node.ID() {
 			continue
 		}
 
-		if err := n.MessageNode(node, body); err != nil {
-			return err
-		}
+		node := node
+		group.Go(func() error { return n.MessageNode(node, body) })
 	}
 
-	return nil
+	return group.Wait()
 }
