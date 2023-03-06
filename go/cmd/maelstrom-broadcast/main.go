@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 
+	"gloomers/cmd/maelstrom-broadcast/network"
 	"gloomers/cmd/maelstrom-broadcast/state"
 	"gloomers/proc"
 
@@ -14,6 +15,7 @@ func main() {
 	defer state.Close()
 
 	node := maelstrom.NewNode()
+	net := network.New(node)
 
 	node.Handle("broadcast", func(msg maelstrom.Message) error {
 		var req broadcastRequest
@@ -22,8 +24,21 @@ func main() {
 		}
 
 		state.Append(req.Message)
+		net.MessageAll(&relayRequest{Message: req.Message})
 		return node.Reply(msg, &broadcastResponse{})
 	})
+
+	node.Handle("relay", func(msg maelstrom.Message) error {
+		var req relayRequest
+		if err := json.Unmarshal(msg.Body, &req); err != nil {
+			return err
+		}
+
+		state.Append(req.Message)
+		return node.Reply(msg, &relayResponse{})
+	})
+
+	node.Handle("relay_ok", func(maelstrom.Message) error { return nil })
 
 	node.Handle("read", func(msg maelstrom.Message) error {
 		var req readRequest
@@ -40,6 +55,7 @@ func main() {
 			return err
 		}
 
+		net.SetTopology(req.Topology)
 		return node.Reply(msg, &topologyResponse{})
 	})
 
@@ -54,6 +70,26 @@ type broadcastResponse struct{}
 
 func (r *broadcastResponse) MarshalJSON() ([]byte, error) {
 	return []byte(`{"type":"broadcast_ok"}`), nil
+}
+
+type relayRequest struct {
+	Message int32 `json:"message"`
+}
+
+func (r *relayRequest) MarshalJSON() ([]byte, error) {
+	type alias relayRequest
+	type aux struct {
+		Type string `json:"type"`
+		alias
+	}
+
+	return json.Marshal(&aux{Type: "relay", alias: (alias)(*r)})
+}
+
+type relayResponse struct{}
+
+func (r *relayResponse) MarshalJSON() ([]byte, error) {
+	return []byte(`{"type":"relay_ok"}`), nil
 }
 
 type readRequest struct{}
@@ -72,7 +108,9 @@ func (r *readResponse) MarshalJSON() ([]byte, error) {
 	return json.Marshal(&aux{Type: "read_ok", alias: (alias)(*r)})
 }
 
-type topologyRequest struct{}
+type topologyRequest struct {
+	Topology map[string][]string `json:"topology"`
+}
 
 type topologyResponse struct{}
 
