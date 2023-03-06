@@ -40,9 +40,6 @@ func (n *Network) SetTopology(topology map[string][]string) {
 }
 
 // MessageNode sends marshals a message to JSON and sends it to a named node.
-// TODO: can messages only be sent to a node's neighbors? if so, this will have
-// to look up a valid path to the named node and then start a forwarding chain
-// from the first node in the path.
 func (n *Network) MessageNode(node string, body any) error {
 	<-n.ready
 	return n.node.Send(node, body)
