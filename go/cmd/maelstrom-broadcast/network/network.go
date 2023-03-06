@@ -1,6 +1,9 @@
 package network
 
 import (
+	"context"
+	"log"
+
 	maelstrom "github.com/jepsen-io/maelstrom/demo/go"
 )
 
@@ -13,12 +16,9 @@ type Node interface {
 	// the local node ID and is the same order across all nodes. Only valid after
 	// "init" message has been received.
 	NodeIDs() []string
-	// RPC sends an async RPC request. Handler invoked when response message
-	// received.
-	RPC(dest string, body any, handler maelstrom.HandlerFunc) error
-	// Send sends a message body to a given destination node and does not wait for
-	// a response.
-	Send(dest string, body any) error
+	// SyncRPC sends a synchronous RPC request. Returns the response message. RPC
+	// errors in the message body are converted to *RPCError and are returned.
+	SyncRPC(ctx context.Context, dest string, body any) (maelstrom.Message, error)
 }
 
 // Network provides methods by which a node may know of and communicate with its
@@ -44,7 +44,19 @@ func (n *Network) Init() {
 // MessageNode sends marshals a message to JSON and sends it to a named node.
 func (n *Network) MessageNode(node string, body any) error {
 	<-n.ready
-	return n.node.Send(node, body)
+
+	for {
+		res, err := n.node.SyncRPC(context.Background(), node, body)
+		switch {
+		case err == nil:
+			return nil
+		case res.RPCError() != nil:
+			log.Printf("RPC failed: %v", err)
+			continue
+		default:
+			return err
+		}
+	}
 }
 
 // MessageAll sends a message to every node in the network.

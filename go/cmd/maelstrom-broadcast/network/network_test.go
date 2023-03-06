@@ -1,6 +1,8 @@
 package network
 
 import (
+	"context"
+	"errors"
 	"testing"
 
 	maelstrom "github.com/jepsen-io/maelstrom/demo/go"
@@ -13,7 +15,7 @@ func TestNetworkMessageNode(t *testing.T) {
 		close(ready)
 
 		sent := make(chan message, 1)
-		node := &mockNode{"n1", []string{"n1"}, sent}
+		node := &mockNode{"n1", []string{"n1"}, sent, nil}
 
 		net := &Network{ready: ready, node: node}
 
@@ -30,7 +32,7 @@ func TestNetworkMessageNode(t *testing.T) {
 
 	t.Run("blocks until network initialized", func(t *testing.T) {
 		sent := make(chan message)
-		node := &mockNode{"n1", []string{"n1"}, sent}
+		node := &mockNode{"n1", []string{"n1"}, sent, nil}
 		net := New(node)
 
 		errs := make(chan error)
@@ -43,13 +45,49 @@ func TestNetworkMessageNode(t *testing.T) {
 
 		select {
 		case msg := <-sent:
-			t.Fatalf("a message was sent before topology was set. sent = %v", msg)
+			t.Fatalf("message sent before network initialized: %v", msg)
 		case err := <-errs:
-			t.Fatalf("MessageNode returned before topology was set. return = %v", err)
+			t.Fatalf("MessageNode returned before network initialized: %v", err)
 		default:
 		}
 
 		net.Init()
+		assert.Equal(t, <-sent, message{"dest", "body"})
+		assert.NoError(t, <-errs)
+	})
+
+	t.Run("resends until successful", func(t *testing.T) {
+		sent := make(chan message)
+		failures := make(chan error)
+		node := &mockNode{"n1", []string{"n1"}, sent, failures}
+
+		net := New(node)
+		net.Init()
+
+		errs := make(chan error)
+		running := make(chan struct{})
+		go func() {
+			close(running)
+			errs <- net.MessageNode("dest", "body")
+		}()
+		<-running
+
+		for _, failure := range []error{
+			errors.New("a"),
+			errors.New("b"),
+			errors.New("c"),
+		} {
+			select {
+			case failures <- failure:
+				continue
+			case msg := <-sent:
+				t.Fatalf("MessageNode returned unexpectedly: %v", msg)
+			case err := <-errs:
+				t.Fatalf("MessageNode did not retry a failure: %v", err)
+			}
+		}
+
+		close(failures)
 		assert.Equal(t, <-sent, message{"dest", "body"})
 		assert.NoError(t, <-errs)
 	})
@@ -59,7 +97,7 @@ func TestNetworkMessageAll(t *testing.T) {
 	t.Run("sends message to every other node in topology", func(t *testing.T) {
 		nodes := []string{"n1", "n2", "n3", "n4"}
 		sent := make(chan message, len(nodes))
-		node := &mockNode{"n1", nodes, sent}
+		node := &mockNode{"n1", nodes, sent, nil}
 		net := New(node)
 		net.Init()
 
@@ -80,9 +118,11 @@ type message struct {
 }
 
 type mockNode struct {
-	id   string
-	ids  []string
-	send chan<- message
+	id  string
+	ids []string
+
+	messages chan<- message
+	failures <-chan error
 }
 
 // ID returns the identifier for this node. Only valid after "init" message
@@ -98,15 +138,24 @@ func (m *mockNode) NodeIDs() []string {
 	return m.ids
 }
 
-// RPC sends an async RPC request. Handler invoked when response message
-// received.
-func (m *mockNode) RPC(dest string, body any, handler maelstrom.HandlerFunc) error {
-	panic("not implemented") // TODO: Implement
-}
-
 // Send sends a message body to a given destination node and does not wait for
 // a response.
 func (m *mockNode) Send(dest string, body any) error {
-	m.send <- message{dest, body}
+	m.messages <- message{dest, body}
 	return nil
+}
+
+// SyncRPC sends a synchronous RPC request. Returns the response message. RPC
+// errors in the message body are converted to *RPCError and are returned.
+func (m *mockNode) SyncRPC(
+	ctx context.Context, dest string, body any,
+) (maelstrom.Message, error) {
+	if m.failures != nil {
+		if err := <-m.failures; err != nil {
+			return maelstrom.Message{}, err
+		}
+	}
+
+	m.messages <- message{dest, body}
+	return maelstrom.Message{}, nil
 }
