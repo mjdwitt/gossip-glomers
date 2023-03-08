@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestNetworkMessageNode(t *testing.T) {
+func TestNetworkSendUntilAck(t *testing.T) {
 	t.Run("we can spy on sent messages", func(t *testing.T) {
 		ready := make(chan struct{})
 		close(ready)
@@ -20,7 +20,7 @@ func TestNetworkMessageNode(t *testing.T) {
 
 		net := &Network{ready: ready, node: node}
 
-		err := net.MessageNode("dest", "body")
+		err := net.sendUntilAck("dest", "body")
 		assert.NoError(t, err)
 
 		select {
@@ -43,7 +43,7 @@ func TestNetworkMessageNode(t *testing.T) {
 		running := make(chan struct{})
 		go func() {
 			close(running)
-			errs <- net.MessageNode("dest", "body")
+			errs <- net.sendUntilAck("dest", "body")
 		}()
 		<-running
 
@@ -56,9 +56,9 @@ func TestNetworkMessageNode(t *testing.T) {
 			case failures <- failure:
 				continue
 			case msg := <-sent:
-				t.Fatalf("MessageNode returned unexpectedly: %v", msg)
+				t.Fatalf("sendUntilAck returned unexpectedly: %v", msg)
 			case err := <-errs:
-				t.Fatalf("MessageNode did not retry a failure: %v", err)
+				t.Fatalf("sendUntilAck did not retry a failure: %v", err)
 			}
 		}
 

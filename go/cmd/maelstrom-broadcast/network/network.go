@@ -40,8 +40,22 @@ func (n *Network) Init(nodes []string) {
 	close(n.ready)
 }
 
-// MessageNode sends marshals a message to JSON and sends it to a named node.
-func (n *Network) MessageNode(node string, body any) error {
+// MessageAll sends a message to every node in the network.
+func (n *Network) MessageAll(body any) error {
+	<-n.ready
+
+	group := &errgroup.Group{}
+	for _, node := range n.nodes {
+		node := node
+		if node != n.node.ID() {
+			group.Go(func() error { return n.sendUntilAck(node, body) })
+		}
+	}
+
+	return group.Wait()
+}
+
+func (n *Network) sendUntilAck(node string, body any) error {
 	for {
 		res, err := n.node.SyncRPC(context.Background(), node, body)
 		switch {
@@ -53,19 +67,4 @@ func (n *Network) MessageNode(node string, body any) error {
 			return err
 		}
 	}
-}
-
-// MessageAll sends a message to every node in the network.
-func (n *Network) MessageAll(body any) error {
-	<-n.ready
-
-	group := &errgroup.Group{}
-	for _, node := range n.nodes {
-		node := node
-		if node != n.node.ID() {
-			group.Go(func() error { return n.MessageNode(node, body) })
-		}
-	}
-
-	return group.Wait()
 }
