@@ -3,6 +3,7 @@ package network
 import (
 	"context"
 	"errors"
+	"log"
 	"testing"
 
 	maelstrom "github.com/jepsen-io/maelstrom/demo/go"
@@ -15,7 +16,7 @@ func TestNetworkMessageNode(t *testing.T) {
 		close(ready)
 
 		sent := make(chan message, 1)
-		node := &mockNode{"n1", []string{"n1"}, sent, nil}
+		node := &mockNode{"n1", sent, nil}
 
 		net := &Network{ready: ready, node: node}
 
@@ -30,39 +31,13 @@ func TestNetworkMessageNode(t *testing.T) {
 		}
 	})
 
-	t.Run("blocks until network initialized", func(t *testing.T) {
-		sent := make(chan message)
-		node := &mockNode{"n1", []string{"n1"}, sent, nil}
-		net := New(node)
-
-		errs := make(chan error)
-		running := make(chan struct{})
-		go func() {
-			close(running)
-			errs <- net.MessageNode("dest", "body")
-		}()
-		<-running
-
-		select {
-		case msg := <-sent:
-			t.Fatalf("message sent before network initialized: %v", msg)
-		case err := <-errs:
-			t.Fatalf("MessageNode returned before network initialized: %v", err)
-		default:
-		}
-
-		net.Init()
-		assert.Equal(t, <-sent, message{"dest", "body"})
-		assert.NoError(t, <-errs)
-	})
-
 	t.Run("resends until successful", func(t *testing.T) {
 		sent := make(chan message)
 		failures := make(chan error)
-		node := &mockNode{"n1", []string{"n1"}, sent, failures}
+		node := &mockNode{"n1", sent, failures}
 
 		net := New(node)
-		net.Init()
+		net.Init([]string{"n1"})
 
 		errs := make(chan error)
 		running := make(chan struct{})
@@ -94,12 +69,39 @@ func TestNetworkMessageNode(t *testing.T) {
 }
 
 func TestNetworkMessageAll(t *testing.T) {
-	t.Run("sends message to every other node in topology", func(t *testing.T) {
+	t.Run("blocks until network initialized", func(t *testing.T) {
+		sent := make(chan message)
+		node := &mockNode{"n1", sent, nil}
+		net := New(node)
+
+		errs := make(chan error)
+		running := make(chan struct{})
+		go func() {
+			close(running)
+			errs <- net.MessageAll("body")
+		}()
+		<-running
+		log.Printf("sut running")
+
+		select {
+		case msg := <-sent:
+			t.Fatalf("message sent before network initialized: %v", msg)
+		case err := <-errs:
+			t.Fatalf("MessageAll returned before network initialized: %v", err)
+		default:
+		}
+
+		net.Init([]string{"n2"})
+		assert.Equal(t, <-sent, message{"n2", "body"})
+		assert.NoError(t, <-errs)
+	})
+
+	t.Run("sends message to every other node", func(t *testing.T) {
 		nodes := []string{"n1", "n2", "n3", "n4"}
 		sent := make(chan message, len(nodes))
-		node := &mockNode{"n1", nodes, sent, nil}
+		node := &mockNode{"n1", sent, nil}
 		net := New(node)
-		net.Init()
+		net.Init(nodes)
 
 		assert.NoError(t, net.MessageAll("body"))
 		close(sent)
@@ -118,8 +120,7 @@ type message struct {
 }
 
 type mockNode struct {
-	id  string
-	ids []string
+	id string
 
 	messages chan<- message
 	failures <-chan error
@@ -129,13 +130,6 @@ type mockNode struct {
 // has been received.
 func (m *mockNode) ID() string {
 	return m.id
-}
-
-// NodeIDs returns a list of all node IDs in the cluster. This list include
-// the local node ID and is the same order across all nodes. Only valid after
-// "init" message has been received.
-func (m *mockNode) NodeIDs() []string {
-	return m.ids
 }
 
 // Send sends a message body to a given destination node and does not wait for
