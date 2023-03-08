@@ -10,17 +10,16 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+var bg context.Context = context.Background()
+
 func TestNetworkSendUntilAck(t *testing.T) {
 	t.Run("we can spy on sent messages", func(t *testing.T) {
-		ready := make(chan struct{})
-		close(ready)
-
 		sent := make(chan message, 1)
 		node := &mockNode{"n1", sent, nil}
 
-		net := &Network{ready: ready, node: node}
+		net := &Network{node: node}
 
-		err := net.sendUntilAck("dest", "body")
+		err := net.sendUntilAck(bg, "dest", "body")
 		assert.NoError(t, err)
 
 		select {
@@ -37,13 +36,12 @@ func TestNetworkSendUntilAck(t *testing.T) {
 		node := &mockNode{"n1", sent, failures}
 
 		net := New(node)
-		net.Init([]string{"n1"})
 
 		errs := make(chan error)
 		running := make(chan struct{})
 		go func() {
 			close(running)
-			errs <- net.sendUntilAck("dest", "body")
+			errs <- net.sendUntilAck(bg, "dest", "body")
 		}()
 		<-running
 
@@ -65,6 +63,24 @@ func TestNetworkSendUntilAck(t *testing.T) {
 		close(failures)
 		assert.Equal(t, <-sent, message{"dest", "body"})
 		assert.NoError(t, <-errs)
+	})
+
+	t.Run("resends if no reply", func(t *testing.T) {
+		t.Skip("TODO: figure out what interface would be testable")
+
+		send := make(chan message)
+		failures := make(chan error)
+		node := &mockNode{"n1", send, failures}
+
+		net := New(node)
+
+		errs := make(chan error)
+		running := make(chan struct{})
+		go func() {
+			close(running)
+			errs <- net.sendUntilAck(bg, "dest", "body")
+		}()
+		<-running
 	})
 }
 

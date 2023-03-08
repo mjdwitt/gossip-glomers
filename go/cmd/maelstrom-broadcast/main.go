@@ -18,7 +18,7 @@ func main() {
 	net := network.New(node)
 
 	node.Handle("init", func(maelstrom.Message) error {
-		net.Init()
+		net.Init(node.NodeIDs())
 		return nil
 	})
 
@@ -29,7 +29,7 @@ func main() {
 		}
 
 		state.Append(req.Message)
-		net.MessageAll(&relayRequest{Message: req.Message})
+		go net.MessageAll(&relayRequest{Message: req.Message})
 		return node.Reply(msg, &broadcastResponse{})
 	})
 

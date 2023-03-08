@@ -2,6 +2,7 @@ package network
 
 import (
 	"context"
+	"time"
 
 	maelstrom "github.com/jepsen-io/maelstrom/demo/go"
 	"golang.org/x/sync/errgroup"
@@ -48,20 +49,26 @@ func (n *Network) MessageAll(body any) error {
 	for _, node := range n.nodes {
 		node := node
 		if node != n.node.ID() {
-			group.Go(func() error { return n.sendUntilAck(node, body) })
+			ctx := context.TODO()
+			group.Go(func() error { return n.sendUntilAck(ctx, node, body) })
 		}
 	}
 
 	return group.Wait()
 }
 
-func (n *Network) sendUntilAck(node string, body any) error {
+func (n *Network) sendUntilAck(
+	ctx context.Context, node string, body any,
+) error {
 	for {
-		res, err := n.node.SyncRPC(context.Background(), node, body)
+		ctx, cancel := context.WithTimeout(ctx, 50*time.Millisecond)
+		defer cancel()
+
+		res, err := n.node.SyncRPC(ctx, node, body)
 		switch {
 		case err == nil:
 			return nil
-		case res.RPCError() != nil:
+		case res.RPCError() != nil || err == context.Canceled:
 			continue
 		default:
 			return err
