@@ -3,5 +3,13 @@
 version = 3
 
 [[package]]
-name = "gossip-gloomers"
+name = "echo"
+version = "0.1.0"
+
+[[package]]
+name = "maelstrom"
+version = "0.1.0"
+
+[[package]]
+name = "runtime"
 version = "0.1.0"

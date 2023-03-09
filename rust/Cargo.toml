@@ -1,8 +1,10 @@
-[package]
-name = "gossip-gloomers"
-version = "0.1.0"
-edition = "2021"
+[workspace]
+members = [
+  # the libraries that i'll use for building these challenges
+  "maelstrom",  # provides types for Maelstrom services like Message and Node.
+                # i may publish this package separately.
+  "runtime",  # provides common runtime like tracing and error reporting
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
-[dependencies]
+  # binary packages implementing each challenge
+  "echo",
+]
