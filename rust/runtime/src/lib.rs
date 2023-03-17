@@ -6,6 +6,6 @@ pub mod tracing;
 
 pub fn setup() -> Result<()> {
     tracing::setup();
-    errors::setup()?;
+    errors::setup_reporting()?;
     Ok(())
 }
