@@ -2,6 +2,8 @@
 //!
 //! [maelstrom protocol]: https://github.com/jepsen-io/maelstrom/blob/main/doc/protocol.md
 
+use std::ops::Add;
+
 use serde::{Deserialize, Serialize};
 
 /// All nodes (and clients) in maelstrom have a unique id.
@@ -24,17 +26,31 @@ impl AsRef<str> for NodeId {
 #[derive(Copy, Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct MsgId(u64);
 
+impl Add for MsgId {
+    type Output = Self;
+    fn add(self, rhs: Self) -> Self {
+        MsgId(self.0 + rhs.0)
+    }
+}
+
+impl Add<u64> for MsgId {
+    type Output = Self;
+    fn add(self, rhs: u64) -> Self {
+        MsgId(self.0 + rhs)
+    }
+}
+
 /// A [message] has a source, destination, and a body.
 ///
 /// [message]: https://github.com/jepsen-io/maelstrom/blob/main/doc/protocol.md#messages
-#[derive(Deserialize, Serialize)]
-pub struct Message<B: Body> {
+#[derive(Debug, Deserialize, Serialize)]
+pub struct Message<B: Body + std::fmt::Debug> {
     pub src: NodeId,
     pub dest: NodeId,
     pub body: B,
 }
 
-impl<B: Body> Message<B> {
+impl<B: Body + std::fmt::Debug> Message<B> {
     pub fn new(src: NodeId, dest: NodeId, body: B) -> Self {
         Self { src, dest, body }
     }

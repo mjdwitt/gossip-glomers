@@ -1,6 +1,9 @@
-use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
-use crate::message::{Body, Headers, NodeId};
+use serde::{Deserialize, Serialize};
+use tokio::sync::RwLock;
+
+use crate::message::{Body, Headers, MsgId, NodeId};
 
 #[derive(Debug, PartialEq, Deserialize, Serialize)]
 pub struct Init {
@@ -17,11 +20,11 @@ pub struct InitOk {
 }
 
 impl Init {
-    pub fn ok(self) -> InitOk {
+    pub fn ok(msg_id: Option<MsgId>) -> InitOk {
         InitOk {
             headers: Headers {
                 type_: "init_ok".into(),
-                in_reply_to: self.headers.msg_id,
+                in_reply_to: msg_id,
                 ..Headers::default()
             },
         }
@@ -34,11 +37,20 @@ impl Body for Init {
     }
 }
 
-pub async fn init(req: Init) -> InitOk {
-    req.ok()
+#[derive(Default)]
+pub struct Ids {
+    pub id: NodeId,
+    pub ids: Vec<NodeId>,
+}
+
+pub async fn init(ids: Arc<RwLock<Ids>>, req: Init) -> InitOk {
+    let mut ids = ids.write().await;
+    ids.id = req.node_id;
+    ids.ids = req.node_ids;
+    Init::ok(req.headers.msg_id)
 }
 
 #[cfg(test)]
-fn init_is_handler() {
+fn _init_is_handler() {
     crate::handler::test::receives_handler(init);
 }
