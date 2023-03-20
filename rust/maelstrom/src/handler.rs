@@ -3,10 +3,11 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
-use serde::de::DeserializeOwned;
-use serde::ser::Serialize;
 use tailsome::*;
 use tokio::sync::RwLock;
+use tracing::*;
+
+use crate::message::{Message, Request, Response};
 
 pub type State<S> = Arc<RwLock<S>>;
 
@@ -22,8 +23,8 @@ impl<S, Fut, Req, Res> ErasedHandler<S> for Box<dyn Handler<Fut, Req, Res, S>>
 where
     S: Send + Sync + 'static,
     Fut: Future<Output = Res> + Send + 'static,
-    Req: DeserializeOwned + Send + 'static,
-    Res: Serialize + Send + 'static,
+    Req: Request + 'static,
+    Res: Response + 'static,
 {
     fn call(
         self: Arc<Self>,
@@ -32,8 +33,10 @@ where
     ) -> Pin<Box<dyn Future<Output = Result<Vec<u8>, Box<dyn Error>>> + Send>> {
         let h = self.clone();
         Box::pin(async move {
-            let req: Req = serde_json::from_str(&raw_request)?;
-            let res: Res = h.callf(state, req).await;
+            let req: Message<Req> = serde_json::from_str(&raw_request)?;
+            debug!(?req, "parsed request");
+            let res: Res = h.callf(state, req.body).await;
+            debug!(?res, "built response");
             serde_json::to_vec(&res)?.into_ok()
         })
     }
@@ -47,8 +50,8 @@ impl<F, Fut, Req, Res, S> Handler<Fut, Req, Res, S> for F
 where
     F: Fn(State<S>, Req) -> Fut + Clone + Send + Sync + 'static,
     Fut: Future<Output = Res> + Send,
-    Req: DeserializeOwned + Send + 'static,
-    Res: Serialize + Send + 'static,
+    Req: Request + 'static,
+    Res: Response + 'static,
 {
     fn callf(&self, state: State<S>, req: Req) -> Fut {
         self(state, req)
@@ -60,15 +63,28 @@ pub mod test {
     use serde::{Deserialize, Serialize};
 
     use super::*;
+    use crate::message::{Body, Headers};
 
-    #[derive(Deserialize)]
-    struct Request(u32);
+    #[derive(Debug, Deserialize)]
+    struct Test(u32);
 
-    #[derive(Serialize)]
-    struct Response(String);
+    impl Body for Test {
+        fn headers(&self) -> &Headers {
+            todo!()
+        }
+    }
 
-    async fn _test(_: State<()>, req: Request) -> Response {
-        Response(req.0.to_string())
+    #[derive(Debug, Serialize)]
+    struct TestOk(String);
+
+    impl Body for TestOk {
+        fn headers(&self) -> &Headers {
+            todo!()
+        }
+    }
+
+    async fn _test(_: State<()>, req: Test) -> TestOk {
+        TestOk(req.0.to_string())
     }
 
     fn _test_is_handler() {
@@ -79,8 +95,8 @@ pub mod test {
     where
         S: Send + Sync + 'static,
         Fut: Future<Output = Res> + Send + 'static,
-        Req: DeserializeOwned + Send + 'static,
-        Res: Serialize + Send + 'static,
+        Req: Request + 'static,
+        Res: Response + 'static,
     {
         let f: Box<dyn Handler<Fut, Req, Res, S>> = Box::new(f);
         let _: Box<dyn ErasedHandler<S>> = Box::new(f);

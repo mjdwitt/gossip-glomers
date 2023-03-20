@@ -4,21 +4,33 @@
 
 use std::ops::Add;
 
-use serde::{Deserialize, Serialize};
+use serde::{de, ser, Deserialize, Serialize};
 
 /// All nodes (and clients) in maelstrom have a unique id.
 #[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
 pub struct NodeId(pub String);
 
-impl Into<String> for NodeId {
-    fn into(self) -> String {
-        self.0
+impl From<String> for NodeId {
+    fn from(s: String) -> Self {
+        Self(s)
+    }
+}
+
+impl From<&str> for NodeId {
+    fn from(s: &str) -> Self {
+        Self(s.to_string())
     }
 }
 
 impl AsRef<str> for NodeId {
     fn as_ref(&self) -> &str {
         &self.0
+    }
+}
+
+impl PartialEq<&str> for NodeId {
+    fn eq(&self, rhs: &&str) -> bool {
+        self.0 == *rhs
     }
 }
 
@@ -44,20 +56,20 @@ impl Add<u64> for MsgId {
 ///
 /// [message]: https://github.com/jepsen-io/maelstrom/blob/main/doc/protocol.md#messages
 #[derive(Debug, Deserialize, Serialize)]
-pub struct Message<B: Body + std::fmt::Debug> {
+pub struct Message<B: Body> {
     pub src: NodeId,
     pub dest: NodeId,
     pub body: B,
 }
 
-impl<B: Body + std::fmt::Debug> Message<B> {
+impl<B: Body> Message<B> {
     pub fn new(src: NodeId, dest: NodeId, body: B) -> Self {
         Self { src, dest, body }
     }
 }
 
 /// The body trait provides access to the common [`Headers`] fields.
-pub trait Body {
+pub trait Body: std::fmt::Debug {
     fn headers(&self) -> &Headers;
 
     fn type_(&self) -> &str {
@@ -72,6 +84,16 @@ pub trait Body {
         self.headers().in_reply_to
     }
 }
+
+/// A convenience trait describing everything a type used as a request must implement.
+pub trait Request: Body + de::DeserializeOwned + Send {}
+
+impl<R> Request for R where R: Body + de::DeserializeOwned + Send {}
+
+/// A convenience trait describing everything a type used as a response must implement.
+pub trait Response: Body + ser::Serialize + Send {}
+
+impl<R> Response for R where R: Body + ser::Serialize + Send {}
 
 /// All [message bodies] contain a type. They may optionally contain a message id and a field
 /// identifying the message to which this one is responding.

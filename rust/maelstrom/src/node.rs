@@ -1,63 +1,71 @@
-#![allow(dead_code)] // TODO: remove this
-
 use std::collections::HashMap;
 use std::future::Future;
 use std::sync::Arc;
 
-use serde::de::DeserializeOwned;
-use serde::ser::Serialize;
 use tap::prelude::*;
-use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWrite, AsyncWriteExt};
+use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::sync::{Mutex, RwLock};
 use tokio::task::JoinSet;
 use tracing::*;
 
 use crate::handler::{ErasedHandler, Handler, State};
-use crate::message::{Error, Headers, Message};
+use crate::message::{Error, Headers, Message, Request, Response};
 
 pub mod init;
 
-type RequestMapper<S> = Arc<RwLock<HashMap<String, Arc<dyn ErasedHandler<S>>>>>;
+type RouteMap<S> = HashMap<String, Arc<dyn ErasedHandler<S>>>;
+type Routes<S> = Arc<RwLock<RouteMap<S>>>;
 
-#[derive(Clone, Default)]
-pub struct Node<S: Default> {
+#[derive(Clone)]
+pub struct Node<S> {
+    ids: State<init::Ids>,
     state: State<S>,
-    handlers: RequestMapper<S>,
+    handlers: Routes<S>,
 }
 
-impl<S: Default + Send + Sync + 'static> Node<S> {
-    pub fn new() -> Self {
-        Self::default()
-    }
+#[derive(Default)]
+pub struct NodeBuilder<S> {
+    handlers: RouteMap<S>,
+}
 
-    pub async fn handle<Fut, Req, Res>(
-        self,
+impl<S> NodeBuilder<S> {
+    pub fn handle<Fut, Req, Res>(
+        mut self,
         type_: impl Into<String>,
         handler: impl Handler<Fut, Req, Res, S> + 'static,
     ) -> Self
     where
         S: Send + Sync + 'static,
         Fut: Future<Output = Res> + Send + 'static,
-        Req: DeserializeOwned + Send + 'static,
-        Res: Serialize + Send + 'static,
+        Req: Request + 'static,
+        Res: Response + 'static,
     {
         let handler: Box<dyn Handler<Fut, Req, Res, S>> = Box::new(handler);
-        self.handlers
-            .write()
-            // TODO: lift this into some builder class that is not thread-safe and does not
-            // use an Arc<RwLock<_>> around the handlers map.
-            .await
-            .insert(type_.into(), Arc::new(handler));
+        self.handlers.insert(type_.into(), Arc::new(handler));
         self
+    }
+
+    pub fn with_state(self, state: State<S>) -> Node<S> {
+        Node {
+            state,
+            ids: Default::default(),
+            handlers: Arc::new(RwLock::new(self.handlers)),
+        }
+    }
+}
+
+impl<S: Default + Send + Sync + 'static> Node<S> {
+    pub fn new() -> NodeBuilder<S> {
+        NodeBuilder::default()
     }
 
     pub async fn run<I, O>(self, i: I, o: O) -> Result<(), tokio::task::JoinError>
     where
-        I: AsyncBufRead + Send + Sync + Unpin,
+        I: AsyncRead + Send + Sync + Unpin,
         O: AsyncWrite + Send + Sync + Unpin + 'static,
     {
         let o = Arc::new(Mutex::new(o));
-        let mut lines = i.lines();
+        let mut lines = BufReader::new(i).lines();
         let mut requests = JoinSet::new();
 
         while let Ok(Some(line)) = lines.next_line().await {
@@ -72,7 +80,6 @@ impl<S: Default + Send + Sync + 'static> Node<S> {
 
         let mut result = Ok(());
         while let Some(res) = requests.join_next().await {
-            debug!(?res, "completed request");
             if result.is_ok() {
                 result = res;
             }
@@ -84,7 +91,7 @@ impl<S: Default + Send + Sync + 'static> Node<S> {
 
 async fn run<O: AsyncWrite + Unpin, S: Send + Sync + 'static>(
     out: Arc<Mutex<O>>,
-    handlers: RequestMapper<S>,
+    handlers: Routes<S>,
     state: State<S>,
     raw: String,
 ) {
@@ -103,7 +110,7 @@ async fn run<O: AsyncWrite + Unpin, S: Send + Sync + 'static>(
         .tap_none(|| error!(?headers, "no handler found for message"))
         .expect("no handler found for message");
 
-    let raw_out = match handler.clone().call(state, raw).await {
+    let mut raw_out = match handler.clone().call(state, raw).await {
         Err(err) => {
             let err = Error {
                 headers: Headers {
@@ -128,6 +135,7 @@ async fn run<O: AsyncWrite + Unpin, S: Send + Sync + 'static>(
         Ok(response) => response,
     };
 
+    raw_out.push(b'\n');
     out.lock()
         .await
         .write_all(&raw_out)
@@ -143,18 +151,20 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn node_run() -> Result<(), tokio::task::JoinError> {
-        let out = Vec::new();
+    async fn node_run() {
+        let ids: Arc<RwLock<init::Ids>> = Default::default();
         Node::new()
             .handle("init", init::init)
-            .await
+            .with_state(ids.clone())
             .run(
-                br#"{"src": "c1", "dest": "n1", "body": {"type": "init", "msg_id": 1, "node_id": "n1", "node_ids": ["n1", "n2", "n3"]}}"#
+                br#"{"src":"c1","dest":"n1","body":{"type":"init","node_id":"n1","node_ids":["n1","n2","n3"]}}"#
                     .as_slice(),
-                out,
-            )
-            .await?;
+                tokio::io::stderr())
+            .await
+            .unwrap();
 
-        Ok(())
+        let ids = Arc::try_unwrap(ids).unwrap().into_inner();
+        assert_eq!(ids.id, "n1");
+        assert_eq!(ids.ids, vec!["n1", "n2", "n3"]);
     }
 }

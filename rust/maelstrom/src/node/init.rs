@@ -13,10 +13,10 @@ pub struct Init {
     pub node_ids: Vec<NodeId>,
 }
 
-#[derive(Debug, PartialEq, Deserialize, Serialize)]
-pub struct InitOk {
-    #[serde(flatten)]
-    pub headers: Headers,
+impl Body for Init {
+    fn headers(&self) -> &Headers {
+        &self.headers
+    }
 }
 
 impl Init {
@@ -31,13 +31,19 @@ impl Init {
     }
 }
 
-impl Body for Init {
+#[derive(Debug, PartialEq, Deserialize, Serialize)]
+pub struct InitOk {
+    #[serde(flatten)]
+    pub headers: Headers,
+}
+
+impl Body for InitOk {
     fn headers(&self) -> &Headers {
         &self.headers
     }
 }
 
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct Ids {
     pub id: NodeId,
     pub ids: Vec<NodeId>,

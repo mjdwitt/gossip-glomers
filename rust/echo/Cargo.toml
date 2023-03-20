@@ -6,3 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+maelstrom = { path = "../maelstrom" }
+runtime = { path = "../runtime" }
+serde = { version = "1.0.155", features = ["derive"] }
+tokio = { version = "1.26.0", features = ["io-std", "rt-multi-thread"] }
