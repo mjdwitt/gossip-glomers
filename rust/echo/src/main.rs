@@ -46,6 +46,7 @@ impl Echo {
 
 #[derive(Debug, Serialize)]
 struct EchoOk {
+    #[serde(flatten)]
     headers: Headers,
     echo: String,
 }
