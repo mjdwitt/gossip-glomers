@@ -10,13 +10,14 @@ use tracing::*;
 use crate::message::{Message, Request, Response};
 
 pub type State<S> = Arc<RwLock<S>>;
+pub type RawResponse = Result<Vec<u8>, Box<dyn Error>>;
 
 pub trait ErasedHandler<S>: Send + Sync {
     fn call(
         self: Arc<Self>,
         state: State<S>,
         raw_request: String,
-    ) -> Pin<Box<dyn Future<Output = Result<Vec<u8>, Box<dyn Error>>> + Send>>;
+    ) -> Pin<Box<dyn Future<Output = RawResponse> + Send>>;
 }
 
 impl<S, Fut, Req, Res> ErasedHandler<S> for Box<dyn Handler<Fut, Req, Res, S>>
@@ -30,7 +31,7 @@ where
         self: Arc<Self>,
         state: State<S>,
         raw_request: String,
-    ) -> Pin<Box<dyn Future<Output = Result<Vec<u8>, Box<dyn Error>>> + Send>> {
+    ) -> Pin<Box<dyn Future<Output = RawResponse> + Send>> {
         let h = self.clone();
         Box::pin(async move {
             let req: Message<Req> = serde_json::from_str(&raw_request)?;
