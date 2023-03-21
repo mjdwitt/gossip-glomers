@@ -5,7 +5,7 @@ use runtime::prelude::*;
 async fn main() -> Result<()> {
     runtime::setup()?;
 
-    Node::new()
+    Node::builder()
         .handle("echo", echo)
         .with_state(Default::default())
         .run(tokio::io::stdin(), tokio::io::stdout())

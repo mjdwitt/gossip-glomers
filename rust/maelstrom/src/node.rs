@@ -57,7 +57,7 @@ impl<S> NodeBuilder<S> {
 }
 
 impl<S: Default + Send + Sync + 'static> Node<S> {
-    pub fn new() -> NodeBuilder<S> {
+    pub fn builder() -> NodeBuilder<S> {
         NodeBuilder::default()
     }
 
@@ -169,7 +169,7 @@ mod tests {
 
     #[tokio::test]
     async fn default_node_handles_init() {
-        let node = Node::new().with_state(Arc::new(RwLock::new(())));
+        let node = Node::builder().with_state(Arc::new(RwLock::new(())));
         node.run(
                 br#"{"src":"c1","dest":"n1","body":{"type":"init","node_id":"n1","node_ids":["n1","n2","n3"]}}"#
                     .as_slice(),
