@@ -159,7 +159,11 @@ async fn run<O: AsyncWrite + Unpin, S: Send + Sync + 'static>(
 
 async fn init(ids: State<init::Ids>, raw: String) -> Result<Vec<u8>, Box<dyn StdError>> {
     let req: Message<init::Init> = serde_json::from_str(&raw)?;
-    let res = init::init(ids, req.body).await;
+    let res = Message {
+        src: req.dest,
+        dest: req.src,
+        body: init::init(ids, req.body).await,
+    };
     serde_json::to_vec(&res)?.into_ok()
 }
 

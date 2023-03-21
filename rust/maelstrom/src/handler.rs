@@ -36,7 +36,11 @@ where
         Box::pin(async move {
             let req: Message<Req> = serde_json::from_str(&raw_request)?;
             debug!(?req, "parsed request");
-            let res: Res = h.callf(state, req.body).await;
+            let res = Message {
+                src: req.dest,
+                dest: req.src,
+                body: h.callf(state, req.body).await,
+            };
             debug!(?res, "built response");
             serde_json::to_vec(&res)?.into_ok()
         })
