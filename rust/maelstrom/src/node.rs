@@ -1,7 +1,9 @@
 use std::collections::HashMap;
+use std::error::Error as StdError;
 use std::future::Future;
 use std::sync::Arc;
 
+use tailsome::*;
 use tap::prelude::*;
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::sync::{Mutex, RwLock};
@@ -59,7 +61,7 @@ impl<S: Default + Send + Sync + 'static> Node<S> {
         NodeBuilder::default()
     }
 
-    pub async fn run<I, O>(self, i: I, o: O) -> Result<(), tokio::task::JoinError>
+    pub async fn run<I, O>(&self, i: I, o: O) -> Result<(), tokio::task::JoinError>
     where
         I: AsyncRead + Send + Sync + Unpin,
         O: AsyncWrite + Send + Sync + Unpin + 'static,
@@ -74,6 +76,7 @@ impl<S: Default + Send + Sync + 'static> Node<S> {
                 o.clone(),
                 self.handlers.clone(),
                 self.state.clone(),
+                self.ids.clone(),
                 line,
             ));
         }
@@ -93,6 +96,7 @@ async fn run<O: AsyncWrite + Unpin, S: Send + Sync + 'static>(
     out: Arc<Mutex<O>>,
     handlers: Routes<S>,
     state: State<S>,
+    ids: State<init::Ids>,
     raw: String,
 ) {
     let headers: Message<Headers> = serde_json::from_str(&raw)
@@ -104,35 +108,42 @@ async fn run<O: AsyncWrite + Unpin, S: Send + Sync + 'static>(
         })
         .unwrap();
 
-    let handlers = handlers.read().await;
-    let handler = handlers
-        .get(&headers.body.type_)
-        .tap_none(|| error!(?headers, "no handler found for message"))
-        .expect("no handler found for message");
+    let mut raw_out = {
+        let res = if &headers.body.type_ == "init" {
+            init(ids, raw).await
+        } else {
+            let handlers = handlers.read().await;
+            let handler = handlers
+                .get(&headers.body.type_)
+                .tap_none(|| error!(?headers, "no handler found for message"))
+                .expect("no handler found for message");
+            handler.clone().call(state, raw).await
+        };
 
-    let mut raw_out = match handler.clone().call(state, raw).await {
-        Err(err) => {
-            let err = Error {
-                headers: Headers {
-                    type_: "error".into(),
-                    in_reply_to: headers.body.msg_id.map(|id| id + 1),
-                    ..Headers::default()
-                },
-                code: 13, // crash: indefinite
-                text: err.to_string(),
-            };
+        match res {
+            Err(err) => {
+                let err = Error {
+                    headers: Headers {
+                        type_: "error".into(),
+                        in_reply_to: headers.body.msg_id.map(|id| id + 1),
+                        ..Headers::default()
+                    },
+                    code: 13, // crash: indefinite
+                    text: err.to_string(),
+                };
 
-            serde_json::to_vec(&err)
-                .tap_err(|serialization_error| {
-                    error!(
-                        ?err,
-                        ?serialization_error,
-                        "failed to serialize Error response to json",
-                    )
-                })
-                .unwrap()
+                serde_json::to_vec(&err)
+                    .tap_err(|serialization_error| {
+                        error!(
+                            ?err,
+                            ?serialization_error,
+                            "failed to serialize Error response to json",
+                        )
+                    })
+                    .unwrap()
+            }
+            Ok(response) => response,
         }
-        Ok(response) => response,
     };
 
     raw_out.push(b'\n');
@@ -146,24 +157,27 @@ async fn run<O: AsyncWrite + Unpin, S: Send + Sync + 'static>(
         .unwrap();
 }
 
+async fn init(ids: State<init::Ids>, raw: String) -> Result<Vec<u8>, Box<dyn StdError>> {
+    let req: Message<init::Init> = serde_json::from_str(&raw)?;
+    let res = init::init(ids, req.body).await;
+    serde_json::to_vec(&res)?.into_ok()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn node_run() {
-        let ids: Arc<RwLock<init::Ids>> = Default::default();
-        Node::new()
-            .handle("init", init::init)
-            .with_state(ids.clone())
-            .run(
+    async fn default_node_handles_init() {
+        let node = Node::new().with_state(Arc::new(RwLock::new(())));
+        node.run(
                 br#"{"src":"c1","dest":"n1","body":{"type":"init","node_id":"n1","node_ids":["n1","n2","n3"]}}"#
                     .as_slice(),
                 tokio::io::stderr())
             .await
             .unwrap();
 
-        let ids = Arc::try_unwrap(ids).unwrap().into_inner();
+        let ids = node.ids.read().await;
         assert_eq!(ids.id, "n1");
         assert_eq!(ids.ids, vec!["n1", "n2", "n3"]);
     }
