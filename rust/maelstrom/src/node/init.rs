@@ -6,6 +6,7 @@ use tokio::sync::RwLock;
 use crate::message::{Body, Headers, MsgId, NodeId};
 
 #[derive(Debug, PartialEq, Deserialize, Serialize)]
+#[serde(tag = "type", rename = "init")]
 pub struct Init {
     #[serde(flatten)]
     pub headers: Headers,
@@ -23,7 +24,6 @@ impl Init {
     pub fn ok(msg_id: Option<MsgId>) -> InitOk {
         InitOk {
             headers: Headers {
-                type_: "init_ok".into(),
                 in_reply_to: msg_id,
                 ..Headers::default()
             },
@@ -32,6 +32,7 @@ impl Init {
 }
 
 #[derive(Debug, PartialEq, Deserialize, Serialize)]
+#[serde(tag = "type", rename = "init_ok")]
 pub struct InitOk {
     #[serde(flatten)]
     pub headers: Headers,

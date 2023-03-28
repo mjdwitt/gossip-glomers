@@ -19,6 +19,7 @@ async fn echo(_: State<()>, req: Echo) -> EchoOk {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(tag = "type", rename = "echo")]
 struct Echo {
     #[serde(flatten)]
     headers: Headers,
@@ -35,7 +36,6 @@ impl Echo {
     fn ok(self) -> EchoOk {
         EchoOk {
             headers: Headers {
-                type_: "echo_ok".into(),
                 in_reply_to: self.headers.msg_id,
                 ..Default::default()
             },
@@ -45,6 +45,7 @@ impl Echo {
 }
 
 #[derive(Debug, Serialize)]
+#[serde(tag = "type", rename = "echo_ok")]
 struct EchoOk {
     #[serde(flatten)]
     headers: Headers,

@@ -72,10 +72,6 @@ impl<B: Body> Message<B> {
 pub trait Body: std::fmt::Debug {
     fn headers(&self) -> &Headers;
 
-    fn type_(&self) -> &str {
-        &self.headers().type_
-    }
-
     fn msg_id(&self) -> Option<MsgId> {
         self.headers().msg_id
     }
@@ -95,14 +91,15 @@ pub trait Response: Body + ser::Serialize + Send {}
 
 impl<R> Response for R where R: Body + ser::Serialize + Send {}
 
-/// All [message bodies] contain a type. They may optionally contain a message id and a field
-/// identifying the message to which this one is responding.
+/// All [message bodies] may optionally contain a message id and a field identifying the message to
+/// which this one is responding.
+///
+/// N.B. All messages contain a type, but we're using `#[serde(tag = "type")]` to generate that for
+/// us from the message type names.
 ///
 /// [message bodies]: https://github.com/jepsen-io/maelstrom/blob/main/doc/protocol.md#message-bodies
 #[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
 pub struct Headers {
-    #[serde(rename = "type")]
-    pub type_: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub msg_id: Option<MsgId>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -115,10 +112,25 @@ impl Body for Headers {
     }
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
+pub struct Type {
+    #[serde(rename = "type")]
+    pub type_: String,
+    #[serde(flatten)]
+    pub headers: Headers,
+}
+
+impl Body for Type {
+    fn headers(&self) -> &Headers {
+        &self.headers
+    }
+}
+
 /// A maelstrom [error] message provides an error code and a descriptive error message.
 ///
 /// [error]: https://github.com/jepsen-io/maelstrom/blob/main/doc/protocol.md#errors
 #[derive(Debug, PartialEq, Deserialize, Serialize)]
+#[serde(tag = "type", rename = "error")]
 pub struct Error {
     #[serde(flatten)]
     pub headers: Headers,
@@ -145,16 +157,13 @@ mod tests {
     #[case::node_id(NodeId("n1".into()), "\"n1\"")]
     #[case::msg_id(MsgId(1), "1")]
     #[case::headers(
-        Headers { type_: "msg".into(), msg_id: Some(MsgId(2)), in_reply_to: Some(MsgId(1)) },
-        r#"{"type":"msg","msg_id":2,"in_reply_to":1}"#,
+        Headers { msg_id: Some(MsgId(2)), in_reply_to: Some(MsgId(1)) },
+        r#"{"msg_id":2,"in_reply_to":1}"#,
     )]
-    #[case::optional_headers(
-        Headers { type_: "msg".into(), ..Headers::default() },
-        r#"{"type":"msg"}"#,
-    )]
+    #[case::optional_headers(Headers::default(), "{}")]
     #[case::error(
         Error {
-            headers: Headers { type_: "error".into(), ..Headers::default() },
+            headers: Headers::default(),
             code: 13,
             text: "node crashed".into(),
         },

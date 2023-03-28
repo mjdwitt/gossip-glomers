@@ -11,7 +11,7 @@ use tokio::task::JoinSet;
 use tracing::*;
 
 use crate::handler::{ErasedHandler, Handler, State};
-use crate::message::{Error, Headers, Message, Request, Response};
+use crate::message::{Body, Error, Headers, Message, Request, Response, Type};
 
 pub mod init;
 
@@ -99,7 +99,7 @@ async fn run<O: AsyncWrite + Unpin, S: Send + Sync + 'static>(
     ids: State<init::Ids>,
     raw: String,
 ) {
-    let headers: Message<Headers> = serde_json::from_str(&raw)
+    let headers: Message<Type> = serde_json::from_str(&raw)
         .tap_err(|deserialization_error| {
             error!(
                 ?deserialization_error,
@@ -124,8 +124,7 @@ async fn run<O: AsyncWrite + Unpin, S: Send + Sync + 'static>(
             Err(err) => {
                 let err = Error {
                     headers: Headers {
-                        type_: "error".into(),
-                        in_reply_to: headers.body.msg_id.map(|id| id + 1),
+                        in_reply_to: headers.body.msg_id().map(|id| id + 1),
                         ..Headers::default()
                     },
                     code: 13, // crash: indefinite
