@@ -8,4 +8,5 @@ members = [
   # binary packages implementing each challenge
   "echo",
   "unique-ids",
+  "broadcast",
 ]
