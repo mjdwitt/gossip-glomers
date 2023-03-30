@@ -179,6 +179,15 @@ dependencies = [
 [[package]]
 name = "broadcast"
 version = "0.1.0"
+dependencies = [
+ "async-std",
+ "maelstrom",
+ "rstest 0.17.0",
+ "runtime",
+ "serde",
+ "tokio",
+ "tracing",
+]
 
 [[package]]
 name = "bumpalo"

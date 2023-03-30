@@ -7,7 +7,7 @@ use std::ops::Add;
 use serde::{de, ser, Deserialize, Serialize};
 
 /// All nodes (and clients) in maelstrom have a unique id.
-#[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Deserialize, Serialize)]
 pub struct NodeId(pub String);
 
 impl From<String> for NodeId {
