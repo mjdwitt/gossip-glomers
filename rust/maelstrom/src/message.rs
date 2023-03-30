@@ -112,6 +112,15 @@ impl Body for Headers {
     }
 }
 
+impl Headers {
+    pub fn reply(self) -> Headers {
+        Headers {
+            in_reply_to: self.msg_id,
+            ..Default::default()
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
 pub struct Type {
     #[serde(rename = "type")]

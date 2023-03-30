@@ -35,10 +35,7 @@ impl Body for Echo {
 impl Echo {
     fn ok(self) -> EchoOk {
         EchoOk {
-            headers: Headers {
-                in_reply_to: self.headers.msg_id,
-                ..Default::default()
-            },
+            headers: self.headers.reply(),
             echo: self.echo,
         }
     }

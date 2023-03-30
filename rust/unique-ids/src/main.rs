@@ -131,10 +131,7 @@ impl Body for Generate {
 impl Generate {
     fn ok(self, id: Id) -> GenerateOk {
         GenerateOk {
-            headers: Headers {
-                in_reply_to: self.headers.msg_id,
-                ..Default::default()
-            },
+            headers: self.headers.reply(),
             id,
         }
     }
