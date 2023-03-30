@@ -122,12 +122,6 @@ pub struct Generate {
     headers: Headers,
 }
 
-impl Body for Generate {
-    fn headers(&self) -> &Headers {
-        &self.headers
-    }
-}
-
 impl Generate {
     fn ok(self, id: Id) -> GenerateOk {
         GenerateOk {
@@ -144,12 +138,6 @@ pub struct GenerateOk {
     #[serde(flatten)]
     headers: Headers,
     id: Id,
-}
-
-impl Body for GenerateOk {
-    fn headers(&self) -> &Headers {
-        &self.headers
-    }
 }
 
 /// The various stateful resources needed to generate an [`Id`].

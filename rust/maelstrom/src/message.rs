@@ -2,6 +2,7 @@
 //!
 //! [maelstrom protocol]: https://github.com/jepsen-io/maelstrom/blob/main/doc/protocol.md
 
+use std::fmt::Debug as FmtDebug;
 use std::ops::Add;
 
 use serde::{de, ser, Deserialize, Serialize};
@@ -56,40 +57,27 @@ impl Add<u64> for MsgId {
 ///
 /// [message]: https://github.com/jepsen-io/maelstrom/blob/main/doc/protocol.md#messages
 #[derive(Debug, Deserialize, Serialize)]
-pub struct Message<B: Body> {
+pub struct Message<B: FmtDebug> {
     pub src: NodeId,
     pub dest: NodeId,
     pub body: B,
 }
 
-impl<B: Body> Message<B> {
+impl<B: FmtDebug> Message<B> {
     pub fn new(src: NodeId, dest: NodeId, body: B) -> Self {
         Self { src, dest, body }
     }
 }
 
-/// The body trait provides access to the common [`Headers`] fields.
-pub trait Body: std::fmt::Debug {
-    fn headers(&self) -> &Headers;
-
-    fn msg_id(&self) -> Option<MsgId> {
-        self.headers().msg_id
-    }
-
-    fn in_reply_to(&self) -> Option<MsgId> {
-        self.headers().in_reply_to
-    }
-}
-
 /// A convenience trait describing everything a type used as a request must implement.
-pub trait Request: Body + de::DeserializeOwned + Send {}
+pub trait Request: FmtDebug + de::DeserializeOwned + Send {}
 
-impl<R> Request for R where R: Body + de::DeserializeOwned + Send {}
+impl<R> Request for R where R: FmtDebug + de::DeserializeOwned + Send {}
 
 /// A convenience trait describing everything a type used as a response must implement.
-pub trait Response: Body + ser::Serialize + Send {}
+pub trait Response: FmtDebug + ser::Serialize + Send {}
 
-impl<R> Response for R where R: Body + ser::Serialize + Send {}
+impl<R> Response for R where R: FmtDebug + ser::Serialize + Send {}
 
 /// All [message bodies] may optionally contain a message id and a field identifying the message to
 /// which this one is responding.
@@ -104,12 +92,6 @@ pub struct Headers {
     pub msg_id: Option<MsgId>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub in_reply_to: Option<MsgId>,
-}
-
-impl Body for Headers {
-    fn headers(&self) -> &Headers {
-        self
-    }
 }
 
 impl Headers {
@@ -129,12 +111,6 @@ pub struct Type {
     pub headers: Headers,
 }
 
-impl Body for Type {
-    fn headers(&self) -> &Headers {
-        &self.headers
-    }
-}
-
 /// A maelstrom [error] message provides an error code and a descriptive error message.
 ///
 /// [error]: https://github.com/jepsen-io/maelstrom/blob/main/doc/protocol.md#errors
@@ -145,12 +121,6 @@ pub struct Error {
     pub headers: Headers,
     pub code: u32, // TODO: use an error code enum?
     pub text: String,
-}
-
-impl Body for Error {
-    fn headers(&self) -> &Headers {
-        &self.headers
-    }
 }
 
 #[cfg(test)]

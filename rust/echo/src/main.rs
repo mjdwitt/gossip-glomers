@@ -26,12 +26,6 @@ struct Echo {
     echo: String,
 }
 
-impl Body for Echo {
-    fn headers(&self) -> &Headers {
-        &self.headers
-    }
-}
-
 impl Echo {
     fn ok(self) -> EchoOk {
         EchoOk {
@@ -47,10 +41,4 @@ struct EchoOk {
     #[serde(flatten)]
     headers: Headers,
     echo: String,
-}
-
-impl Body for EchoOk {
-    fn headers(&self) -> &Headers {
-        &self.headers
-    }
 }

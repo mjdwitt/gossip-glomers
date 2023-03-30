@@ -3,7 +3,7 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 
-use crate::message::{Body, Headers, MsgId, NodeId};
+use crate::message::{Headers, MsgId, NodeId};
 
 #[derive(Debug, PartialEq, Deserialize, Serialize)]
 #[serde(tag = "type", rename = "init")]
@@ -12,12 +12,6 @@ pub struct Init {
     pub headers: Headers,
     pub node_id: NodeId,
     pub node_ids: Vec<NodeId>,
-}
-
-impl Body for Init {
-    fn headers(&self) -> &Headers {
-        &self.headers
-    }
 }
 
 impl Init {
@@ -36,12 +30,6 @@ impl Init {
 pub struct InitOk {
     #[serde(flatten)]
     pub headers: Headers,
-}
-
-impl Body for InitOk {
-    fn headers(&self) -> &Headers {
-        &self.headers
-    }
 }
 
 #[derive(Debug, Default)]

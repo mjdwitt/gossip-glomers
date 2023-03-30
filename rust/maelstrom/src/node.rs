@@ -11,7 +11,7 @@ use tokio::task::JoinSet;
 use tracing::*;
 
 use crate::handler::{ErasedHandler, Handler, State};
-use crate::message::{Body, Error, Headers, Message, Request, Response, Type};
+use crate::message::{Error, Headers, Message, Request, Response, Type};
 
 pub mod init;
 
@@ -124,7 +124,7 @@ async fn run<O: AsyncWrite + Unpin, S: Send + Sync + 'static>(
             Err(err) => {
                 let err = Error {
                     headers: Headers {
-                        in_reply_to: headers.body.msg_id().map(|id| id + 1),
+                        in_reply_to: headers.body.headers.msg_id.map(|id| id + 1),
                         ..Headers::default()
                     },
                     code: 13, // crash: indefinite

@@ -68,25 +68,12 @@ pub mod test {
     use serde::{Deserialize, Serialize};
 
     use super::*;
-    use crate::message::{Body, Headers};
 
     #[derive(Debug, Deserialize)]
     struct Test(u32);
 
-    impl Body for Test {
-        fn headers(&self) -> &Headers {
-            todo!()
-        }
-    }
-
     #[derive(Debug, Serialize)]
     struct TestOk(String);
-
-    impl Body for TestOk {
-        fn headers(&self) -> &Headers {
-            todo!()
-        }
-    }
 
     async fn _test(_: State<()>, req: Test) -> TestOk {
         TestOk(req.0.to_string())

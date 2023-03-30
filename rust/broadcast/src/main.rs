@@ -54,12 +54,6 @@ pub struct Broadcast {
     message: u64,
 }
 
-impl Body for Broadcast {
-    fn headers(&self) -> &Headers {
-        &self.headers
-    }
-}
-
 impl Broadcast {
     fn ok(self) -> BroadcastOk {
         BroadcastOk {
@@ -75,23 +69,11 @@ pub struct BroadcastOk {
     headers: Headers,
 }
 
-impl Body for BroadcastOk {
-    fn headers(&self) -> &Headers {
-        &self.headers
-    }
-}
-
 #[derive(Debug, Default, Deserialize)]
 #[serde(tag = "type", rename = "read")]
 pub struct Read {
     #[serde(flatten)]
     headers: Headers,
-}
-
-impl Body for Read {
-    fn headers(&self) -> &Headers {
-        &self.headers
-    }
 }
 
 impl Read {
@@ -111,24 +93,12 @@ pub struct ReadOk {
     messages: Vec<u64>,
 }
 
-impl Body for ReadOk {
-    fn headers(&self) -> &Headers {
-        &self.headers
-    }
-}
-
 #[derive(Debug, Default, Deserialize)]
 #[serde(tag = "type", rename = "topology")]
 pub struct Topology {
     #[serde(flatten)]
     headers: Headers,
     topology: HashMap<NodeId, Vec<NodeId>>,
-}
-
-impl Body for Topology {
-    fn headers(&self) -> &Headers {
-        &self.headers
-    }
 }
 
 #[derive(Debug, Default, Serialize)]
@@ -138,8 +108,3 @@ pub struct TopologyOk {
     headers: Headers,
 }
 
-impl Body for TopologyOk {
-    fn headers(&self) -> &Headers {
-        &self.headers
-    }
-}
