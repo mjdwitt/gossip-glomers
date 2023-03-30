@@ -6,4 +6,4 @@ pub use serde::{self, Deserialize, Serialize};
 pub use tailsome::*;
 pub use tap::prelude::*;
 pub use tokio::sync::RwLock;
-pub use tracing::*;
+pub use tracing::info;
