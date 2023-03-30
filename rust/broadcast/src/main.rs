@@ -20,18 +20,30 @@ async fn main() -> Result<()> {
 }
 
 #[instrument(skip(state))]
-pub async fn broadcast(state: State<()>, req: Broadcast) -> BroadcastOk {
-    todo!()
+pub async fn broadcast(state: State, req: Broadcast) -> BroadcastOk {
+    state.write().await.messages.push(req.message);
+    req.ok()
 }
 
 #[instrument(skip(state))]
-pub async fn read(state: State<()>, req: Read) -> ReadOk {
-    todo!()
+pub async fn read(state: State, req: Read) -> ReadOk {
+    req.ok(state.read().await.messages.clone())
 }
 
 #[instrument(skip(state))]
-pub async fn topology(state: State<()>, req: Topology) -> TopologyOk {
-    todo!()
+pub async fn topology(state: State, req: Topology) -> TopologyOk {
+    state.write().await.topology = req.topology;
+    TopologyOk {
+        headers: req.headers.reply(),
+    }
+}
+
+type State = Arc<RwLock<Data>>;
+
+#[derive(Default)]
+pub struct Data {
+    messages: Vec<u64>,
+    topology: HashMap<NodeId, Vec<NodeId>>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -45,6 +57,14 @@ pub struct Broadcast {
 impl Body for Broadcast {
     fn headers(&self) -> &Headers {
         &self.headers
+    }
+}
+
+impl Broadcast {
+    fn ok(self) -> BroadcastOk {
+        BroadcastOk {
+            headers: self.headers.reply(),
+        }
     }
 }
 
@@ -71,6 +91,15 @@ pub struct Read {
 impl Body for Read {
     fn headers(&self) -> &Headers {
         &self.headers
+    }
+}
+
+impl Read {
+    fn ok(self, messages: Vec<u64>) -> ReadOk {
+        ReadOk {
+            headers: self.headers.reply(),
+            messages,
+        }
     }
 }
 
