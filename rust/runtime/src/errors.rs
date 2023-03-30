@@ -8,5 +8,5 @@ pub fn setup_reporting() -> Result<()> {
         env::set_var("RUST_LIB_BACKTRACE", "1");
     }
 
-    color_eyre::install()
+    stable_eyre::install()
 }
