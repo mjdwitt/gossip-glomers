@@ -145,6 +145,11 @@ async fn run<O: AsyncWrite + Unpin, S: Send + Sync + 'static>(
         }
     };
 
+    // Some handlers may return `()`, which gets serialized to "null". Don't print those.
+    if raw_out == b"null" {
+        return;
+    }
+
     raw_out.push(b'\n');
     out.lock()
         .await
