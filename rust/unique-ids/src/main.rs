@@ -83,7 +83,7 @@ impl Id {
 
 /// The main handler in this scenario responsible for generating each unique [`Id`].
 pub async fn generate<C: Clock, I: IdSource>(
-    state: State<Source<C, I>>,
+    state: Arc<RwLock<Source<C, I>>>,
     req: Generate,
 ) -> GenerateOk {
     let state = state.write().await;

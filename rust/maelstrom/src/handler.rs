@@ -4,13 +4,11 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use tailsome::*;
-use tokio::sync::RwLock;
 use tracing::*;
 
 use crate::message::{Message, Request, Response};
 use crate::node::state::{FromRef, NodeState};
 
-pub type State<S> = Arc<RwLock<S>>;
 pub type RawResponse = Result<Vec<u8>, Box<dyn Error>>;
 
 pub trait ErasedHandler<S: Clone + FromRef<NodeState<S>>>: Send + Sync {
@@ -89,7 +87,7 @@ pub mod test {
     #[derive(Debug, Serialize)]
     struct TestOk(String);
 
-    async fn _test(_: State<()>, req: Test) -> TestOk {
+    async fn _test(req: Test) -> TestOk {
         TestOk(req.0.to_string())
     }
 
@@ -97,15 +95,14 @@ pub mod test {
         receives_handler(Box::new(_test));
     }
 
-    pub fn receives_handler<T, S, Req, Res, Fut>(f: impl Handler<T, S, Req, Res, Fut> + 'static)
+    pub fn receives_handler<T, Req, Res, Fut>(f: impl Handler<T, (), Req, Res, Fut> + 'static)
     where
         T: 'static,
-        S: FromRef<NodeState<S>> + Clone + Send + Sync + 'static,
         Req: Request + 'static,
         Res: Response + 'static,
         Fut: Future<Output = Res> + Send + 'static,
     {
-        let f: Box<dyn Handler<T, S, Req, Res, Fut>> = Box::new(f);
-        let _: Box<dyn ErasedHandler<S>> = Box::new(f);
+        let f: Box<dyn Handler<T, (), Req, Res, Fut>> = Box::new(f);
+        let _: Box<dyn ErasedHandler<()>> = Box::new(f);
     }
 }
