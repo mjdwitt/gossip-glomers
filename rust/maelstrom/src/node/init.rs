@@ -1,7 +1,10 @@
+use std::error::Error as StdError;
 use std::sync::Arc;
 
+use futures::future::Shared;
 use serde::{Deserialize, Serialize};
-use tokio::sync::oneshot::Sender;
+use tailsome::*;
+use tokio::sync::oneshot::{Receiver, Sender};
 use tokio::sync::Mutex;
 
 use crate::message::{Headers, MsgId, NodeId};
@@ -39,7 +42,7 @@ pub struct Ids {
     pub(crate) ids: Vec<NodeId>,
 }
 
-pub async fn init(ids: Arc<Mutex<Option<Sender<Ids>>>>, req: Init) -> InitOk {
+pub async fn init(ids: IdTx, req: Init) -> InitOk {
     let ids = ids.lock().await.take().expect("already initialized");
     ids.send(Ids {
         id: req.node_id,
@@ -47,4 +50,29 @@ pub async fn init(ids: Arc<Mutex<Option<Sender<Ids>>>>, req: Init) -> InitOk {
     })
     .expect("failed to initialize node; cannot proceed");
     Init::ok(req.headers.msg_id)
+}
+
+pub type IdTx = Arc<Mutex<Option<Sender<Ids>>>>;
+
+#[derive(Clone)]
+pub struct IdRx(Shared<Receiver<Ids>>);
+
+impl From<Shared<Receiver<Ids>>> for IdRx {
+    fn from(ids: Shared<Receiver<Ids>>) -> Self {
+        IdRx(ids)
+    }
+}
+
+impl IdRx {
+    pub async fn id(&self) -> Result<NodeId, Box<dyn StdError>> {
+        self.0.clone().await?.id.into_ok()
+    }
+
+    pub async fn ids(&self) -> Result<Vec<NodeId>, Box<dyn StdError>> {
+        self.0.clone().await?.ids.into_ok()
+    }
+
+    pub async fn into_inner(self) -> Result<Ids, Box<dyn StdError>> {
+        self.0.await?.into_ok()
+    }
 }

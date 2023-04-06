@@ -7,11 +7,11 @@ use tailsome::*;
 use tracing::*;
 
 use crate::message::{Message, Request, Response};
-use crate::node::state::{FromRef, NodeState};
+use crate::node::state::{FromRef, State};
 
 pub type RawResponse = Result<Vec<u8>, Box<dyn Error>>;
 
-pub trait ErasedHandler<S: Clone + FromRef<NodeState<S>>>: Send + Sync {
+pub trait ErasedHandler<S: Clone + FromRef<State<S>>>: Send + Sync {
     fn call(
         self: Arc<Self>,
         state: S,
@@ -22,7 +22,7 @@ pub trait ErasedHandler<S: Clone + FromRef<NodeState<S>>>: Send + Sync {
 impl<T, S, Req, Res, Fut> ErasedHandler<S> for Box<dyn Handler<T, S, Req, Res, Fut>>
 where
     T: 'static,
-    S: FromRef<NodeState<S>> + Clone + Send + Sync + 'static,
+    S: FromRef<State<S>> + Clone + Send + Sync + 'static,
     Req: Request + 'static,
     Res: Response + 'static,
     Fut: Future<Output = Res> + Send + 'static,

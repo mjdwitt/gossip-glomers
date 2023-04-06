@@ -18,14 +18,14 @@ use crate::message::{Error, Headers, Message, NodeId, Request, Response, Type};
 pub mod init;
 pub mod state;
 
-use state::{FromRef, NodeState, RefInner};
+use state::{FromRef, RefInner, State};
 
 type RouteMap<S> = HashMap<String, Arc<dyn ErasedHandler<S>>>;
 type Routes<S> = Arc<RwLock<RouteMap<S>>>;
 
-pub struct Node<S: Clone + FromRef<NodeState<S>>> {
+pub struct Node<S: Clone + FromRef<State<S>>> {
     ids: Arc<Mutex<Option<Sender<init::Ids>>>>,
-    state: NodeState<S>,
+    state: State<S>,
     handlers: Routes<S>,
 }
 
@@ -34,7 +34,7 @@ pub struct NodeBuilder<S> {
     handlers: RouteMap<S>,
 }
 
-impl<S: Clone + FromRef<NodeState<S>>> NodeBuilder<S> {
+impl<S: Clone + FromRef<State<S>>> NodeBuilder<S> {
     pub fn handle<T, Req, Res, Fut>(
         mut self,
         type_: impl Into<String>,
@@ -55,8 +55,8 @@ impl<S: Clone + FromRef<NodeState<S>>> NodeBuilder<S> {
     pub fn with_state(self, app: S) -> Node<S> {
         let (tx, rx) = tokio::sync::oneshot::channel();
         Node {
-            state: NodeState {
-                ids: rx.shared(),
+            state: State {
+                ids: rx.shared().into(),
                 app,
             },
             ids: Arc::new(Mutex::new(Some(tx))),
@@ -65,17 +65,17 @@ impl<S: Clone + FromRef<NodeState<S>>> NodeBuilder<S> {
     }
 }
 
-impl<S: FromRef<NodeState<S>> + Clone + Default + Send + Sync + 'static> Node<S> {
+impl<S: FromRef<State<S>> + Clone + Default + Send + Sync + 'static> Node<S> {
     pub fn builder() -> NodeBuilder<S> {
         NodeBuilder::default()
     }
 
     pub async fn id(&self) -> Result<NodeId, Box<dyn StdError>> {
-        self.state.ids.clone().await?.id.into_ok()
+        self.state.ids.id().await
     }
 
     pub async fn ids(&self) -> Result<Vec<NodeId>, Box<dyn StdError>> {
-        self.state.ids.clone().await?.ids.into_ok()
+        self.state.ids.ids().await
     }
 
     pub async fn run<I, O>(&self, i: I, o: O) -> Result<(), tokio::task::JoinError>
@@ -109,10 +109,10 @@ impl<S: FromRef<NodeState<S>> + Clone + Default + Send + Sync + 'static> Node<S>
     }
 }
 
-async fn run<O: AsyncWrite + Unpin, S: FromRef<NodeState<S>> + Clone + Send + Sync + 'static>(
+async fn run<O: AsyncWrite + Unpin, S: FromRef<State<S>> + Clone + Send + Sync + 'static>(
     out: Arc<Mutex<O>>,
     handlers: Routes<S>,
-    state: NodeState<S>,
+    state: State<S>,
     ids: Arc<Mutex<Option<Sender<init::Ids>>>>,
     raw: String,
 ) {
@@ -205,7 +205,7 @@ mod tests {
             .await
             .unwrap();
 
-        let ids: init::Ids = node.state.ids.await.unwrap();
+        let ids: init::Ids = node.state.ids.into_inner().await.unwrap();
         assert_eq!(ids.id, "n1");
         assert_eq!(ids.ids, vec!["n1", "n2", "n3"]);
     }

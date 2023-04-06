@@ -1,13 +1,8 @@
-use futures::future::Shared;
-use tokio::sync::oneshot::Receiver;
-
-use super::init::Ids;
-
-pub struct State;
+use super::init::IdRx;
 
 #[derive(Clone)]
-pub struct NodeState<S: Clone> {
-    pub(crate) ids: Shared<Receiver<Ids>>,
+pub struct State<S: Clone> {
+    pub(crate) ids: IdRx,
     pub(crate) app: S,
 }
 
@@ -21,8 +16,8 @@ impl<T: Clone> FromRef<T> for T {
     }
 }
 
-impl<S: Clone> FromRef<NodeState<S>> for S {
-    fn from_ref(input: &NodeState<S>) -> S {
+impl<S: Clone> FromRef<State<S>> for S {
+    fn from_ref(input: &State<S>) -> S {
         input.app.clone()
     }
 }
