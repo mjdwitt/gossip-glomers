@@ -53,7 +53,7 @@ pub trait Handler<T, S, Req, Res, Fut: Future<Output = Res>>: Send + Sync {
     fn callf(&self, state: S, req: Req) -> Fut;
 }
 
-impl<S, Req, Res, Fut, F> Handler<(S, Req), S, Req, Res, Fut> for F
+impl<S, Req, Res, Fut, F> Handler<(S,), S, Req, Res, Fut> for F
 where
     Req: Request + 'static,
     Res: Response + 'static,
@@ -62,6 +62,18 @@ where
 {
     fn callf(&self, state: S, req: Req) -> Fut {
         self(state, req)
+    }
+}
+
+impl<S, Req, Res, Fut, F> Handler<(), S, Req, Res, Fut> for F
+where
+    Req: Request + 'static,
+    Res: Response + 'static,
+    Fut: Future<Output = Res> + Send,
+    F: Fn(Req) -> Fut + Clone + Send + Sync + 'static,
+{
+    fn callf(&self, _: S, req: Req) -> Fut {
+        self(req)
     }
 }
 

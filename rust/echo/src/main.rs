@@ -14,7 +14,7 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-async fn echo(_: (), req: Echo) -> EchoOk {
+async fn echo(req: Echo) -> EchoOk {
     req.ok()
 }
 
