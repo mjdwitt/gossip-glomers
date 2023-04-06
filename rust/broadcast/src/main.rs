@@ -25,8 +25,9 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-#[instrument(skip(state))]
-pub async fn broadcast(state: State, req: Broadcast) -> BroadcastOk {
+#[instrument(skip(ids, state))]
+pub async fn broadcast(ids: Ids, state: State, req: Broadcast) -> BroadcastOk {
+    let _ = ids; // TODO: use the input ids to send rpcs to other nodes
     state.write().await.messages.push(req.message);
     req.ok()
 }
