@@ -7,6 +7,7 @@ use tailsome::*;
 use tracing::*;
 
 use crate::message::{Message, Request, Response};
+use crate::node::init::Ids;
 use crate::node::state::{FromRef, State};
 
 pub type RawResponse = Result<Vec<u8>, Box<dyn Error>>;
@@ -14,6 +15,7 @@ pub type RawResponse = Result<Vec<u8>, Box<dyn Error>>;
 pub trait ErasedHandler<S: Clone + FromRef<State<S>>>: Send + Sync {
     fn call(
         self: Arc<Self>,
+        ids: Ids,
         state: S,
         raw_request: String,
     ) -> Pin<Box<dyn Future<Output = RawResponse> + Send>>;
@@ -29,6 +31,7 @@ where
 {
     fn call(
         self: Arc<Self>,
+        ids: Ids,
         state: S,
         raw_request: String,
     ) -> Pin<Box<dyn Future<Output = RawResponse> + Send>> {
@@ -39,7 +42,7 @@ where
             let res = Message {
                 src: req.dest,
                 dest: req.src,
-                body: h.callf(state, req.body).await,
+                body: h.callf(ids, state, req.body).await,
             };
             debug!(?res, "built response");
             serde_json::to_vec(&res)?.into_ok()
@@ -48,7 +51,19 @@ where
 }
 
 pub trait Handler<T, S, Req, Res, Fut: Future<Output = Res>>: Send + Sync {
-    fn callf(&self, state: S, req: Req) -> Fut;
+    fn callf(&self, ids: Ids, state: S, req: Req) -> Fut;
+}
+
+impl<S, Req, Res, Fut, F> Handler<(Ids, S), S, Req, Res, Fut> for F
+where
+    Req: Request + 'static,
+    Res: Response + 'static,
+    Fut: Future<Output = Res> + Send,
+    F: Fn(Ids, S, Req) -> Fut + Clone + Send + Sync + 'static,
+{
+    fn callf(&self, ids: Ids, state: S, req: Req) -> Fut {
+        self(ids, state, req)
+    }
 }
 
 impl<S, Req, Res, Fut, F> Handler<(S,), S, Req, Res, Fut> for F
@@ -58,7 +73,7 @@ where
     Fut: Future<Output = Res> + Send,
     F: Fn(S, Req) -> Fut + Clone + Send + Sync + 'static,
 {
-    fn callf(&self, state: S, req: Req) -> Fut {
+    fn callf(&self, _: Ids, state: S, req: Req) -> Fut {
         self(state, req)
     }
 }
@@ -70,7 +85,7 @@ where
     Fut: Future<Output = Res> + Send,
     F: Fn(Req) -> Fut + Clone + Send + Sync + 'static,
 {
-    fn callf(&self, _: S, req: Req) -> Fut {
+    fn callf(&self, _: Ids, _: S, req: Req) -> Fut {
         self(req)
     }
 }

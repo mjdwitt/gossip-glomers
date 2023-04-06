@@ -1,9 +1,15 @@
-use super::init::IdRx;
+use super::init::{IdRx, Ids};
 
 #[derive(Clone)]
 pub struct State<S: Clone> {
     pub(crate) ids: IdRx,
     pub(crate) app: S,
+}
+
+impl<S: Clone> State<S> {
+    pub async fn ids(&self) -> Ids {
+        self.ids.clone().await.unwrap()
+    }
 }
 
 pub trait FromRef<T> {

@@ -13,7 +13,7 @@ use tokio::task::JoinSet;
 use tracing::*;
 
 use crate::handler::{ErasedHandler, Handler};
-use crate::message::{Error, Headers, Message, NodeId, Request, Response, Type};
+use crate::message::{Error, Headers, Message, Request, Response, Type};
 
 pub mod init;
 pub mod state;
@@ -68,14 +68,6 @@ impl<S: Clone + FromRef<State<S>>> NodeBuilder<S> {
 impl<S: FromRef<State<S>> + Clone + Default + Send + Sync + 'static> Node<S> {
     pub fn builder() -> NodeBuilder<S> {
         NodeBuilder::default()
-    }
-
-    pub async fn id(&self) -> Result<NodeId, Box<dyn StdError>> {
-        self.state.ids.id().await
-    }
-
-    pub async fn ids(&self) -> Result<Vec<NodeId>, Box<dyn StdError>> {
-        self.state.ids.ids().await
     }
 
     pub async fn run<I, O>(&self, i: I, o: O) -> Result<(), tokio::task::JoinError>
@@ -134,7 +126,10 @@ async fn run<O: AsyncWrite + Unpin, S: FromRef<State<S>> + Clone + Send + Sync +
                 .get(&headers.body.type_)
                 .tap_none(|| error!(?headers, "no handler found for message"))
                 .expect("no handler found for message");
-            handler.clone().call(state.inner(), raw).await
+            handler
+                .clone()
+                .call(state.ids().await, state.inner(), raw)
+                .await
         };
 
         match res {
@@ -205,7 +200,7 @@ mod tests {
             .await
             .unwrap();
 
-        let ids: init::Ids = node.state.ids.into_inner().await.unwrap();
+        let ids: init::Ids = node.state.ids().await;
         assert_eq!(ids.id, "n1");
         assert_eq!(ids.ids, vec!["n1", "n2", "n3"]);
     }
