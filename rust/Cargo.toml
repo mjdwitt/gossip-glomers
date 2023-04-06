@@ -9,4 +9,6 @@ members = [
   "echo",
   "unique-ids",
   "broadcast",
+
+  "scratch",
 ]
