@@ -21,8 +21,9 @@ pub trait ErasedHandler<S: Clone + FromRef<NodeState<S>>>: Send + Sync {
     ) -> Pin<Box<dyn Future<Output = RawResponse> + Send>>;
 }
 
-impl<S, Req, Res, Fut> ErasedHandler<S> for Box<dyn Handler<S, Req, Res, Fut>>
+impl<T, S, Req, Res, Fut> ErasedHandler<S> for Box<dyn Handler<T, S, Req, Res, Fut>>
 where
+    T: 'static,
     S: FromRef<NodeState<S>> + Clone + Send + Sync + 'static,
     Req: Request + 'static,
     Res: Response + 'static,
@@ -48,11 +49,11 @@ where
     }
 }
 
-pub trait Handler<S, Req, Res, Fut: Future<Output = Res>>: Send + Sync {
+pub trait Handler<T, S, Req, Res, Fut: Future<Output = Res>>: Send + Sync {
     fn callf(&self, state: S, req: Req) -> Fut;
 }
 
-impl<S, Req, Res, Fut, F> Handler<S, Req, Res, Fut> for F
+impl<S, Req, Res, Fut, F> Handler<(S, Req), S, Req, Res, Fut> for F
 where
     Req: Request + 'static,
     Res: Response + 'static,
@@ -84,14 +85,15 @@ pub mod test {
         receives_handler(Box::new(_test));
     }
 
-    pub fn receives_handler<S, Req, Res, Fut>(f: impl Handler<S, Req, Res, Fut> + 'static)
+    pub fn receives_handler<T, S, Req, Res, Fut>(f: impl Handler<T, S, Req, Res, Fut> + 'static)
     where
+        T: 'static,
         S: FromRef<NodeState<S>> + Clone + Send + Sync + 'static,
         Req: Request + 'static,
         Res: Response + 'static,
         Fut: Future<Output = Res> + Send + 'static,
     {
-        let f: Box<dyn Handler<S, Req, Res, Fut>> = Box::new(f);
+        let f: Box<dyn Handler<T, S, Req, Res, Fut>> = Box::new(f);
         let _: Box<dyn ErasedHandler<S>> = Box::new(f);
     }
 }

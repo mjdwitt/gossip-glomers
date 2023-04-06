@@ -35,18 +35,19 @@ pub struct NodeBuilder<S> {
 }
 
 impl<S: Clone + FromRef<NodeState<S>>> NodeBuilder<S> {
-    pub fn handle<Fut, Req, Res>(
+    pub fn handle<T, Req, Res, Fut>(
         mut self,
         type_: impl Into<String>,
-        handler: impl Handler<S, Req, Res, Fut> + 'static,
+        handler: impl Handler<T, S, Req, Res, Fut> + 'static,
     ) -> Self
     where
+        T: 'static,
         S: Send + Sync + 'static,
         Fut: Future<Output = Res> + Send + 'static,
         Req: Request + 'static,
         Res: Response + 'static,
     {
-        let handler: Box<dyn Handler<S, Req, Res, Fut>> = Box::new(handler);
+        let handler: Box<dyn Handler<T, S, Req, Res, Fut>> = Box::new(handler);
         self.handlers.insert(type_.into(), Arc::new(handler));
         self
     }
