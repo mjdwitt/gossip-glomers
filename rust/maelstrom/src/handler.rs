@@ -8,28 +8,29 @@ use tokio::sync::RwLock;
 use tracing::*;
 
 use crate::message::{Message, Request, Response};
+use crate::node::state::{FromRef, NodeState};
 
 pub type State<S> = Arc<RwLock<S>>;
 pub type RawResponse = Result<Vec<u8>, Box<dyn Error>>;
 
-pub trait ErasedHandler<S>: Send + Sync {
+pub trait ErasedHandler<S: Clone + FromRef<NodeState<S>>>: Send + Sync {
     fn call(
         self: Arc<Self>,
-        state: State<S>,
+        state: S,
         raw_request: String,
     ) -> Pin<Box<dyn Future<Output = RawResponse> + Send>>;
 }
 
 impl<S, Fut, Req, Res> ErasedHandler<S> for Box<dyn Handler<Fut, Req, Res, S>>
 where
-    S: Send + Sync + 'static,
+    S: FromRef<NodeState<S>> + Clone + Send + Sync + 'static,
     Fut: Future<Output = Res> + Send + 'static,
     Req: Request + 'static,
     Res: Response + 'static,
 {
     fn call(
         self: Arc<Self>,
-        state: State<S>,
+        state: S,
         raw_request: String,
     ) -> Pin<Box<dyn Future<Output = RawResponse> + Send>> {
         let h = self.clone();
@@ -48,17 +49,17 @@ where
 }
 
 pub trait Handler<Fut, Req, Res, S>: Send + Sync {
-    fn callf(&self, state: State<S>, req: Req) -> Fut;
+    fn callf(&self, state: S, req: Req) -> Fut;
 }
 
 impl<F, Fut, Req, Res, S> Handler<Fut, Req, Res, S> for F
 where
-    F: Fn(State<S>, Req) -> Fut + Clone + Send + Sync + 'static,
+    F: Fn(S, Req) -> Fut + Clone + Send + Sync + 'static,
     Fut: Future<Output = Res> + Send,
     Req: Request + 'static,
     Res: Response + 'static,
 {
-    fn callf(&self, state: State<S>, req: Req) -> Fut {
+    fn callf(&self, state: S, req: Req) -> Fut {
         self(state, req)
     }
 }
@@ -85,7 +86,7 @@ pub mod test {
 
     pub fn receives_handler<Fut, Req, Res, S>(f: impl Handler<Fut, Req, Res, S> + 'static)
     where
-        S: Send + Sync + 'static,
+        S: FromRef<NodeState<S>> + Clone + Send + Sync + 'static,
         Fut: Future<Output = Res> + Send + 'static,
         Req: Request + 'static,
         Res: Response + 'static,

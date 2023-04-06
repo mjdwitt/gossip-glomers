@@ -1,7 +1,8 @@
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
-use tokio::sync::RwLock;
+use tokio::sync::oneshot::Sender;
+use tokio::sync::Mutex;
 
 use crate::message::{Headers, MsgId, NodeId};
 
@@ -32,20 +33,18 @@ pub struct InitOk {
     pub headers: Headers,
 }
 
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct Ids {
-    pub id: NodeId,
-    pub ids: Vec<NodeId>,
+    pub(crate) id: NodeId,
+    pub(crate) ids: Vec<NodeId>,
 }
 
-pub async fn init(ids: Arc<RwLock<Ids>>, req: Init) -> InitOk {
-    let mut ids = ids.write().await;
-    ids.id = req.node_id;
-    ids.ids = req.node_ids;
+pub async fn init(ids: Arc<Mutex<Option<Sender<Ids>>>>, req: Init) -> InitOk {
+    let ids = ids.lock().await.take().expect("already initialized");
+    ids.send(Ids {
+        id: req.node_id,
+        ids: req.node_ids,
+    })
+    .expect("failed to initialize node; cannot proceed");
     Init::ok(req.headers.msg_id)
-}
-
-#[cfg(test)]
-fn _init_is_handler() {
-    crate::handler::test::receives_handler(init);
 }

@@ -18,7 +18,7 @@ async fn main() -> Result<()> {
         .handle("replicate", replicate)
         .handle("replicate_ok", replicate_ok)
         .handle("error", error)
-        .with_state(Default::default())
+        .with_state(Arc::new(RwLock::new(Data::default())))
         .run(tokio::io::stdin(), tokio::io::stdout())
         .await?;
 

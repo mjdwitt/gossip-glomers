@@ -7,14 +7,14 @@ async fn main() -> Result<()> {
 
     Node::builder()
         .handle("echo", echo)
-        .with_state(Default::default())
+        .with_state(())
         .run(tokio::io::stdin(), tokio::io::stdout())
         .await?;
 
     Ok(())
 }
 
-async fn echo(_: State<()>, req: Echo) -> EchoOk {
+async fn echo(_: (), req: Echo) -> EchoOk {
     req.ok()
 }
 
