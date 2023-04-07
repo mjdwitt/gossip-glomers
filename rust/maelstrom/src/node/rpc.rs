@@ -29,7 +29,7 @@ impl<O: AsyncWrite + Unpin> Rpc<O> {
 
     pub async fn send<B: Serialize + std::fmt::Debug>(
         &self,
-        msg: Message<B>,
+        msg: &Message<B>,
     ) -> Result<(), Box<dyn Error>> {
         let mut msg = serde_json::to_vec(&msg)?;
         msg.push(b'\n');

@@ -36,8 +36,8 @@ impl PartialEq<&str> for NodeId {
 }
 
 /// Message bodies have whole-number ids.
-#[derive(Copy, Clone, Debug, PartialEq, Deserialize, Serialize)]
-pub struct MsgId(u64);
+#[derive(Copy, Clone, Debug, Hash, Eq, PartialEq, Deserialize, Serialize)]
+pub struct MsgId(pub u64);
 
 impl Add for MsgId {
     type Output = Self;
