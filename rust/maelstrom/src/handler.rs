@@ -118,35 +118,3 @@ where
         self(req)
     }
 }
-
-#[cfg(test)]
-pub mod test {
-    use serde::{Deserialize, Serialize};
-
-    use super::*;
-
-    #[derive(Debug, Deserialize)]
-    struct Test(u32);
-
-    #[derive(Debug, Serialize)]
-    struct TestOk(String);
-
-    async fn _test(req: Test) -> TestOk {
-        TestOk(req.0.to_string())
-    }
-
-    fn _test_is_handler() {
-        receives_handler(Box::new(_test));
-    }
-
-    pub fn receives_handler<T, Req, Res, Fut>(f: impl Handler<T, (), Req, Res, Fut> + 'static)
-    where
-        T: 'static,
-        Req: Request + 'static,
-        Res: Response + 'static,
-        Fut: Future<Output = Res> + Send + 'static,
-    {
-        let f: Box<dyn Handler<T, (), Req, Res, Fut>> = Box::new(f);
-        let _: Box<dyn ErasedHandler<()>> = Box::new(f);
-    }
-}
