@@ -16,29 +16,41 @@ use crate::handler::{ErasedHandler, Handler};
 use crate::message::{Error, Headers, Message, Request, Response, Type};
 
 pub mod init;
+pub mod rpc;
 pub mod state;
 
+use rpc::Rpc;
 use state::{FromRef, RefInner, State};
 
-type RouteMap<S> = HashMap<String, Arc<dyn ErasedHandler<S>>>;
-type Routes<S> = Arc<RwLock<RouteMap<S>>>;
+type RouteMap<O, S> = HashMap<String, Arc<dyn ErasedHandler<O, S>>>;
+type Routes<O, S> = Arc<RwLock<RouteMap<O, S>>>;
 
-pub struct Node<S: Clone + FromRef<State<S>>> {
+pub struct Node<O: AsyncWrite, S: Clone + FromRef<State<S>>> {
     ids: Arc<Mutex<Option<Sender<init::Ids>>>>,
     state: State<S>,
-    handlers: Routes<S>,
+    handlers: Routes<O, S>,
 }
 
 #[derive(Default)]
-pub struct NodeBuilder<S> {
-    handlers: RouteMap<S>,
+pub struct NodeBuilder<O, S> {
+    handlers: RouteMap<O, S>,
 }
 
-impl<S: Clone + FromRef<State<S>>> NodeBuilder<S> {
+impl<O, S> NodeBuilder<O, S>
+where
+    O: AsyncWrite + Send + Sync + Unpin + 'static,
+    S: Clone + FromRef<State<S>>,
+{
+    fn new() -> Self {
+        Self {
+            handlers: Default::default(),
+        }
+    }
+
     pub fn handle<T, Req, Res, Fut>(
         mut self,
         type_: impl Into<String>,
-        handler: impl Handler<T, S, Req, Res, Fut> + 'static,
+        handler: impl Handler<T, S, O, Req, Res, Fut> + 'static,
     ) -> Self
     where
         T: 'static,
@@ -47,12 +59,12 @@ impl<S: Clone + FromRef<State<S>>> NodeBuilder<S> {
         Req: Request + 'static,
         Res: Response + 'static,
     {
-        let handler: Box<dyn Handler<T, S, Req, Res, Fut>> = Box::new(handler);
+        let handler: Box<dyn Handler<T, S, O, Req, Res, Fut>> = Box::new(handler);
         self.handlers.insert(type_.into(), Arc::new(handler));
         self
     }
 
-    pub fn with_state(self, app: S) -> Node<S> {
+    pub fn with_state(self, app: S) -> Node<O, S> {
         let (tx, rx) = tokio::sync::oneshot::channel();
         Node {
             state: State {
@@ -65,15 +77,18 @@ impl<S: Clone + FromRef<State<S>>> NodeBuilder<S> {
     }
 }
 
-impl<S: FromRef<State<S>> + Clone + Default + Send + Sync + 'static> Node<S> {
-    pub fn builder() -> NodeBuilder<S> {
-        NodeBuilder::default()
+impl<O, S> Node<O, S>
+where
+    O: AsyncWrite + Send + Sync + Unpin + 'static,
+    S: FromRef<State<S>> + Clone + Default + Send + Sync + 'static,
+{
+    pub fn builder() -> NodeBuilder<O, S> {
+        NodeBuilder::new()
     }
 
-    pub async fn run<I, O>(&self, i: I, o: O) -> Result<(), tokio::task::JoinError>
+    pub async fn run<I>(&self, i: I, o: O) -> Result<(), tokio::task::JoinError>
     where
         I: AsyncRead + Send + Sync + Unpin,
-        O: AsyncWrite + Send + Sync + Unpin + 'static,
     {
         let o = Arc::new(Mutex::new(o));
         let mut lines = BufReader::new(i).lines();
@@ -86,6 +101,7 @@ impl<S: FromRef<State<S>> + Clone + Default + Send + Sync + 'static> Node<S> {
                 self.handlers.clone(),
                 self.state.clone(),
                 self.ids.clone(),
+                Rpc::new(o.clone()),
                 line,
             ));
         }
@@ -101,13 +117,17 @@ impl<S: FromRef<State<S>> + Clone + Default + Send + Sync + 'static> Node<S> {
     }
 }
 
-async fn run<O: AsyncWrite + Unpin, S: FromRef<State<S>> + Clone + Send + Sync + 'static>(
+async fn run<O, S>(
     out: Arc<Mutex<O>>,
-    handlers: Routes<S>,
+    handlers: Routes<O, S>,
     state: State<S>,
     ids: Arc<Mutex<Option<Sender<init::Ids>>>>,
+    rpc: Rpc<O>,
     raw: String,
-) {
+) where
+    O: AsyncWrite + Unpin,
+    S: FromRef<State<S>> + Clone + Send + Sync + 'static,
+{
     let headers: Message<Type> = serde_json::from_str(&raw)
         .tap_err(|deserialization_error| {
             error!(
@@ -128,7 +148,7 @@ async fn run<O: AsyncWrite + Unpin, S: FromRef<State<S>> + Clone + Send + Sync +
                 .expect("no handler found for message");
             handler
                 .clone()
-                .call(state.ids().await, state.inner(), raw)
+                .call(rpc.clone(), state.ids().await, state.inner(), raw)
                 .await
         };
 
