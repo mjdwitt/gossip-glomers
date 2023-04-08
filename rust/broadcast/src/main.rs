@@ -1,9 +1,11 @@
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
 
 use maelstrom::prelude::*;
 use runtime::prelude::*;
 use tokio::io::AsyncWrite;
-use tracing::{error, instrument};
+use tracing::{debug, error, instrument};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -49,18 +51,19 @@ pub async fn topology(state: State, req: Topology) -> TopologyOk {
     }
 }
 
-fn replicate_message<O>(rpc: Rpc<O>, ids: Ids, _state: State, message: u64)
+fn replicate_message<O>(rpc: Rpc<O>, ids: Ids, state: State, message: u64)
 where
     O: AsyncWrite + Send + Sync + Unpin + 'static,
 {
     for node in ids.ids {
         tokio::spawn(replicate_message_to_node(
             rpc.clone(),
+            state.clone(),
             Message {
                 src: ids.id.clone(),
                 dest: node.clone(),
                 body: Replicate {
-                    msg_id: MsgId(0),
+                    msg_id: state.next_id.fetch_add(1, Ordering::SeqCst).into(),
                     message,
                 },
             },
@@ -68,19 +71,31 @@ where
     }
 }
 
-async fn replicate_message_to_node<O>(rpc: Rpc<O>, msg: Message<Replicate>)
+async fn replicate_message_to_node<O>(rpc: Rpc<O>, state: State, msg: Message<Replicate>)
 where
     O: AsyncWrite + Send + Sync + Unpin + 'static,
 {
-    rpc.send(&msg)
+    state
+        .pending
+        .write()
         .await
-        .tap_err(|err| {
+        .insert(msg.body.msg_id, msg.clone());
+
+    let mut res = rpc.send(&msg).await;
+
+    loop {
+        res = res.tap_err(|err| {
             error!(?err, ?msg, "failed to send replication rpc");
-        })
-        .expect("TODO: retry if error (maybe after some timeout?)");
-    // TODO:
-    // - store sent (or to-be-sent?) messages in state.pending
-    // - wait to see if the msg is ack'd and resend after some timeout
+        });
+
+        tokio::time::sleep(Duration::from_millis(500)).await;
+
+        if res.is_err() || state.pending.read().await.contains_key(&msg.body.msg_id) {
+            res = rpc.send(&msg).await;
+        } else {
+            break;
+        }
+    }
 }
 
 #[instrument(skip(state))]
@@ -91,17 +106,12 @@ pub async fn replicate(state: State, req: Replicate) -> ReplicateOk {
 
 #[instrument(skip(state))]
 pub async fn replicate_ok(state: State, req: ReplicateOk) {
-    if state
-        .pending
-        .write()
-        .await
-        .remove(&req.in_reply_to)
-        .is_none()
-    {
-        error!(
+    match state.pending.write().await.remove(&req.in_reply_to) {
+        None => error!(
             ?req,
             "Received ack for a Replicate message id that was never sent or already ack'd"
-        );
+        ),
+        Some(ackd) => debug!(?req, ?ackd, "Replicate acknowledged"),
     }
 }
 
@@ -129,6 +139,7 @@ pub struct State {
     messages: Arc<RwLock<Vec<u64>>>,
     topology: Arc<RwLock<HashMap<NodeId, Vec<NodeId>>>>,
 
+    next_id: Arc<AtomicU64>,
     pending: Arc<RwLock<HashMap<MsgId, Message<Replicate>>>>,
 }
 
@@ -194,7 +205,7 @@ pub struct TopologyOk {
     headers: Headers,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(tag = "type", rename = "replicate")]
 pub struct Replicate {
     msg_id: MsgId,

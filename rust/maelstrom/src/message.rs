@@ -37,7 +37,7 @@ impl PartialEq<&str> for NodeId {
 
 /// Message bodies have whole-number ids.
 #[derive(Copy, Clone, Debug, Hash, Eq, PartialEq, Deserialize, Serialize)]
-pub struct MsgId(pub u64);
+pub struct MsgId(u64);
 
 impl Add for MsgId {
     type Output = Self;
@@ -53,10 +53,16 @@ impl Add<u64> for MsgId {
     }
 }
 
+impl From<u64> for MsgId {
+    fn from(n: u64) -> Self {
+        Self(n)
+    }
+}
+
 /// A [message] has a source, destination, and a body.
 ///
 /// [message]: https://github.com/jepsen-io/maelstrom/blob/main/doc/protocol.md#messages
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Message<B: FmtDebug> {
     pub src: NodeId,
     pub dest: NodeId,
