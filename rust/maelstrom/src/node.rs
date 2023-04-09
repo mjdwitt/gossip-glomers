@@ -177,8 +177,8 @@ async fn run<O, S>(
         }
     };
 
-    // Some handlers may return `()`, which gets serialized to "null". Don't print those.
-    if raw_out == b"null" {
+    // Some handlers may return an empty body, indicating that they have no reply to send.
+    if serde_json::from_slice::<Message<()>>(&raw_out).is_ok() {
         return;
     }
 
