@@ -7,7 +7,7 @@ use tailsome::*;
 use tokio::io::AsyncWrite;
 use tracing::*;
 
-use crate::message::{Message, Request, Response};
+use crate::message::{Body, Message, Request, Response};
 use crate::node::init::Ids;
 use crate::node::rpc::Rpc;
 use crate::node::state::{FromRef, State};
@@ -51,7 +51,11 @@ where
             let res = Message {
                 src: req.dest,
                 dest: req.src,
-                body: h.callf(rpc, ids, state, req.body).await,
+                body: Body {
+                    msg_id: None,
+                    in_reply_to: req.body.msg_id,
+                    body: h.callf(rpc, ids, state, req.body.body).await,
+                },
             };
             debug!(?res, "built response");
             serde_json::to_vec(&res)?.into_ok()

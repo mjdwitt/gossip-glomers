@@ -13,12 +13,14 @@ use tokio::task::JoinSet;
 use tracing::*;
 
 use crate::handler::{ErasedHandler, Handler};
-use crate::message::{Error, Headers, Message, Request, Response, Type};
+use crate::message::{Body, Message, Request, Response, Type};
 
+pub mod error;
 pub mod init;
 pub mod rpc;
 pub mod state;
 
+use error::Error;
 use rpc::Rpc;
 use state::{FromRef, RefInner, State};
 
@@ -109,6 +111,9 @@ where
         let mut result = Ok(());
         while let Some(res) = requests.join_next().await {
             if result.is_ok() {
+                if let Err(ref err) = res {
+                    error!(?err, "request task failed");
+                }
                 result = res;
             }
         }
@@ -117,6 +122,7 @@ where
     }
 }
 
+#[instrument(skip(out, handlers, state, ids, rpc))]
 async fn run<O, S>(
     out: Arc<Mutex<O>>,
     handlers: Routes<O, S>,
@@ -125,7 +131,7 @@ async fn run<O, S>(
     rpc: Rpc<O>,
     raw: String,
 ) where
-    O: AsyncWrite + Unpin,
+    O: AsyncWrite + Send + Sync + Unpin + 'static,
     S: FromRef<State<S>> + Clone + Send + Sync + 'static,
 {
     let headers: Message<Type> = serde_json::from_str(&raw)
@@ -138,27 +144,31 @@ async fn run<O, S>(
         .unwrap();
 
     let mut raw_out = {
-        let res = if &headers.body.type_ == "init" {
-            init(ids, raw).await
-        } else {
-            let handlers = handlers.read().await;
-            let handler = handlers
-                .get(&headers.body.type_)
-                .tap_none(|| error!(?headers, "no handler found for message"))
-                .expect("no handler found for message");
-            handler
-                .clone()
-                .call(rpc.clone(), state.ids().await, state.inner(), raw)
-                .await
+        let res = match headers.body.body.type_.as_str() {
+            "init" => init(ids, raw).await,
+            "error" => error(rpc.clone(), raw).await.and(Ok(vec![])),
+            _ => {
+                if let Some(source_id) = headers.body.in_reply_to {
+                    if let Ok(msg) = serde_json::from_str(&raw) {
+                        rpc.notify_ok(source_id, msg).await;
+                    }
+                }
+
+                let handlers = handlers.read().await;
+                let handler = handlers
+                    .get(&headers.body().type_)
+                    .tap_none(|| error!(?headers, "no handler found for message"))
+                    .expect("no handler found for message");
+                handler
+                    .clone()
+                    .call(rpc.clone(), state.ids().await, state.inner(), raw)
+                    .await
+            }
         };
 
         match res {
             Err(err) => {
                 let err = Error {
-                    headers: Headers {
-                        in_reply_to: headers.body.headers.msg_id.map(|id| id + 1),
-                        ..Headers::default()
-                    },
                     code: 13, // crash: indefinite
                     text: err.to_string(),
                 };
@@ -178,7 +188,7 @@ async fn run<O, S>(
     };
 
     // Some handlers may return an empty body, indicating that they have no reply to send.
-    if serde_json::from_slice::<Message<()>>(&raw_out).is_ok() {
+    if null_body(&raw_out) {
         return;
     }
 
@@ -201,14 +211,45 @@ async fn init(
     let res = Message {
         src: req.dest,
         dest: req.src,
-        body: init::init(ids, req.body).await,
+        body: Body {
+            msg_id: None,
+            in_reply_to: req.body.msg_id,
+            body: init::init(ids, req.body.body).await,
+        },
     };
     serde_json::to_vec(&res)?.into_ok()
 }
 
+async fn error<O>(rpc: Rpc<O>, raw: String) -> Result<(), Box<dyn StdError>>
+where
+    O: AsyncWrite + Send + Sync + Unpin + 'static,
+{
+    error::error(rpc, serde_json::from_str(&raw)?)
+        .await
+        .into_ok()
+}
+
+fn null_body(raw_out: &[u8]) -> bool {
+    serde_json::from_slice::<Message<Type>>(raw_out).is_err()
+}
+
 #[cfg(test)]
 mod tests {
+    use rstest::rstest;
+
     use super::*;
+
+    #[rstest]
+    #[case(br#"{"src": "n1", "dest": "c1", "body": {} }"#)]
+    fn null_body_true(#[case] output: &[u8]) {
+        assert!(null_body(output));
+    }
+
+    #[rstest]
+    #[case(br#"{"src": "n1", "dest": "c1", "body": { "type": "init_ok" } }"#)]
+    fn null_body_false(#[case] output: &[u8]) {
+        assert!(!null_body(output));
+    }
 
     #[tokio::test]
     async fn default_node_handles_init() {

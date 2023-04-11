@@ -117,17 +117,11 @@ fn gen_sync<C: Clock, I: IdSource>(
 /// A request for a new [`Id`].
 #[derive(Debug, Default, Deserialize)]
 #[serde(tag = "type", rename = "generate")]
-pub struct Generate {
-    #[serde(flatten)]
-    headers: Headers,
-}
+pub struct Generate {}
 
 impl Generate {
     fn ok(self, id: Id) -> GenerateOk {
-        GenerateOk {
-            headers: self.headers.reply(),
-            id,
-        }
+        GenerateOk { id }
     }
 }
 
@@ -135,8 +129,6 @@ impl Generate {
 #[derive(Debug, Serialize)]
 #[serde(tag = "type", rename = "generate_ok")]
 pub struct GenerateOk {
-    #[serde(flatten)]
-    headers: Headers,
     id: Id,
 }
 
