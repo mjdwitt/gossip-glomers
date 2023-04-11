@@ -69,12 +69,6 @@ pub struct Message<B: FmtDebug> {
     pub body: B,
 }
 
-impl<B: FmtDebug> Message<B> {
-    pub fn new(src: NodeId, dest: NodeId, body: B) -> Self {
-        Self { src, dest, body }
-    }
-}
-
 /// A convenience trait describing everything a type used as a request must implement.
 pub trait Request: FmtDebug + de::DeserializeOwned + Send {}
 
