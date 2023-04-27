@@ -5,14 +5,13 @@ use std::sync::Arc;
 
 use tailsome::*;
 use tokio::io::AsyncWrite;
-use tracing::*;
 
-use crate::message::{Body, Message, Request, Response};
+use crate::message::{Message, Request, Response};
 use crate::node::init::Ids;
-use crate::node::rpc::Rpc;
+use crate::node::rpc::RpcWriter;
 use crate::node::state::{FromRef, State};
 
-pub type RawResponse = Result<Vec<u8>, Box<dyn Error>>;
+pub type RawResponse = Result<serde_json::Value, Box<dyn Error>>;
 
 pub trait ErasedHandler<O, S>: Send + Sync
 where
@@ -21,7 +20,7 @@ where
 {
     fn call(
         self: Arc<Self>,
-        rpc: Rpc<O>,
+        rpc: RpcWriter<O>,
         ids: Ids,
         state: S,
         raw_request: String,
@@ -39,7 +38,7 @@ where
 {
     fn call(
         self: Arc<Self>,
-        rpc: Rpc<O>,
+        rpc: RpcWriter<O>,
         ids: Ids,
         state: S,
         raw_request: String,
@@ -47,18 +46,8 @@ where
         let h = self.clone();
         Box::pin(async move {
             let req: Message<Req> = serde_json::from_str(&raw_request)?;
-            debug!(?req, "parsed request");
-            let res = Message {
-                src: req.dest,
-                dest: req.src,
-                body: Body {
-                    msg_id: None,
-                    in_reply_to: req.body.msg_id,
-                    body: h.callf(rpc, ids, state, req.body.body).await,
-                },
-            };
-            debug!(?res, "built response");
-            serde_json::to_vec(&res)?.into_ok()
+            let res = h.callf(rpc, ids, state, req.body.body).await;
+            serde_json::to_value(&res)?.into_ok()
         })
     }
 }
@@ -68,18 +57,18 @@ where
     O: AsyncWrite + Unpin,
     Fut: Future<Output = Res>,
 {
-    fn callf(&self, rpc: Rpc<O>, ids: Ids, state: S, req: Req) -> Fut;
+    fn callf(&self, rpc: RpcWriter<O>, ids: Ids, state: S, req: Req) -> Fut;
 }
 
-impl<S, O, Req, Res, Fut, F> Handler<(Rpc<O>, Ids, S), S, O, Req, Res, Fut> for F
+impl<S, O, Req, Res, Fut, F> Handler<(RpcWriter<O>, Ids, S), S, O, Req, Res, Fut> for F
 where
     O: AsyncWrite + Unpin,
     Req: Request + 'static,
     Res: Response + 'static,
     Fut: Future<Output = Res> + Send,
-    F: Fn(Rpc<O>, Ids, S, Req) -> Fut + Clone + Send + Sync + 'static,
+    F: Fn(RpcWriter<O>, Ids, S, Req) -> Fut + Clone + Send + Sync + 'static,
 {
-    fn callf(&self, rpc: Rpc<O>, ids: Ids, state: S, req: Req) -> Fut {
+    fn callf(&self, rpc: RpcWriter<O>, ids: Ids, state: S, req: Req) -> Fut {
         self(rpc, ids, state, req)
     }
 }
@@ -92,7 +81,7 @@ where
     Fut: Future<Output = Res> + Send,
     F: Fn(Ids, S, Req) -> Fut + Clone + Send + Sync + 'static,
 {
-    fn callf(&self, _: Rpc<O>, ids: Ids, state: S, req: Req) -> Fut {
+    fn callf(&self, _: RpcWriter<O>, ids: Ids, state: S, req: Req) -> Fut {
         self(ids, state, req)
     }
 }
@@ -105,7 +94,7 @@ where
     Fut: Future<Output = Res> + Send,
     F: Fn(S, Req) -> Fut + Clone + Send + Sync + 'static,
 {
-    fn callf(&self, _: Rpc<O>, _: Ids, state: S, req: Req) -> Fut {
+    fn callf(&self, _: RpcWriter<O>, _: Ids, state: S, req: Req) -> Fut {
         self(state, req)
     }
 }
@@ -118,7 +107,7 @@ where
     Fut: Future<Output = Res> + Send,
     F: Fn(Req) -> Fut + Clone + Send + Sync + 'static,
 {
-    fn callf(&self, _: Rpc<O>, _: Ids, _: S, req: Req) -> Fut {
+    fn callf(&self, _: RpcWriter<O>, _: Ids, _: S, req: Req) -> Fut {
         self(req)
     }
 }

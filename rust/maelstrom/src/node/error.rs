@@ -3,7 +3,7 @@ use tokio::io::AsyncWrite;
 use tracing::*;
 
 use crate::message::Message;
-use crate::node::rpc::Rpc;
+use crate::node::rpc::{Rpc, RpcWriter};
 
 /// A maelstrom [error] message provides an error code and a descriptive error message.
 ///
@@ -16,7 +16,7 @@ pub struct Error {
 }
 
 #[instrument(skip(rpc))]
-pub async fn error<O>(rpc: Rpc<O>, msg: Message<Error>)
+pub async fn error<O>(rpc: RpcWriter<O>, msg: Message<Error>)
 where
     O: AsyncWrite + Send + Sync + Unpin + 'static,
 {

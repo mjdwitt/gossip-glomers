@@ -4,16 +4,17 @@ use std::future::Future;
 use std::sync::Arc;
 
 use futures::FutureExt;
+use serde_json::json;
 use tailsome::*;
 use tap::prelude::*;
-use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, BufReader};
 use tokio::sync::oneshot::Sender;
 use tokio::sync::{Mutex, RwLock};
 use tokio::task::JoinSet;
 use tracing::*;
 
 use crate::handler::{ErasedHandler, Handler};
-use crate::message::{Body, Message, Request, Response, Type};
+use crate::message::{Message, Request, Response, Type};
 
 pub mod error;
 pub mod init;
@@ -21,7 +22,7 @@ pub mod rpc;
 pub mod state;
 
 use error::Error;
-use rpc::Rpc;
+use rpc::{Rpc, RpcWriter};
 use state::{FromRef, RefInner, State};
 
 type RouteMap<O, S> = HashMap<String, Arc<dyn ErasedHandler<O, S>>>;
@@ -70,7 +71,7 @@ where
         let (tx, rx) = tokio::sync::oneshot::channel();
         Node {
             state: State {
-                ids: rx.shared().into(),
+                ids: rx.shared(),
                 app,
             },
             ids: Arc::new(Mutex::new(Some(tx))),
@@ -99,11 +100,10 @@ where
         while let Ok(Some(line)) = lines.next_line().await {
             debug!(?line, "received request");
             requests.spawn(run(
-                o.clone(),
                 self.handlers.clone(),
                 self.state.clone(),
                 self.ids.clone(),
-                Rpc::new(o.clone()),
+                RpcWriter::new(o.clone()),
                 line,
             ));
         }
@@ -122,13 +122,11 @@ where
     }
 }
 
-#[instrument(skip(out, handlers, state, ids, rpc))]
 async fn run<O, S>(
-    out: Arc<Mutex<O>>,
     handlers: Routes<O, S>,
     state: State<S>,
     ids: Arc<Mutex<Option<Sender<init::Ids>>>>,
-    rpc: Rpc<O>,
+    rpc: RpcWriter<O>,
     raw: String,
 ) where
     O: AsyncWrite + Send + Sync + Unpin + 'static,
@@ -143,123 +141,91 @@ async fn run<O, S>(
         })
         .unwrap();
 
-    let mut raw_out = {
-        let res = match headers.body.body.type_.as_str() {
-            "init" => init(ids, raw).await,
-            "error" => error(rpc.clone(), raw).await.and(Ok(vec![])),
-            _ => {
-                if let Some(source_id) = headers.body.in_reply_to {
-                    if let Ok(msg) = serde_json::from_str(&raw) {
-                        rpc.notify_ok(source_id, msg).await;
-                    }
+    let reply = match headers.body.body.type_.as_str() {
+        "init" => init(ids, raw).await,
+        "error" => error(rpc.clone(), raw).await,
+        _ => {
+            if let Some(source_id) = headers.body.in_reply_to {
+                if let Ok(msg) = serde_json::from_str(&raw) {
+                    rpc.notify_ok(source_id, msg).await;
                 }
-
-                let handlers = handlers.read().await;
-                let handler = handlers
-                    .get(&headers.body().type_)
-                    .tap_none(|| error!(?headers, "no handler found for message"))
-                    .expect("no handler found for message");
-                handler
-                    .clone()
-                    .call(rpc.clone(), state.ids().await, state.inner(), raw)
-                    .await
             }
-        };
 
-        match res {
-            Err(err) => {
-                let err = Error {
-                    code: 13, // crash: indefinite
-                    text: err.to_string(),
-                };
-
-                serde_json::to_vec(&err)
-                    .tap_err(|serialization_error| {
-                        error!(
-                            ?err,
-                            ?serialization_error,
-                            "failed to serialize Error response to json",
-                        )
-                    })
-                    .unwrap()
-            }
-            Ok(response) => response,
+            let handlers = handlers.read().await;
+            let handler = handlers
+                .get(&headers.body().type_)
+                .tap_none(|| error!(?headers, "no handler found for message"))
+                .expect("no handler found for message");
+            handler
+                .clone()
+                .call(rpc.clone(), state.ids().await, state.inner(), raw)
+                .await
         }
-    };
+    }
+    .unwrap_or_else(|err| {
+        serde_json::to_value(&Error {
+            code: 13, // crash: indefinite
+            text: err.to_string(),
+        })
+        .unwrap()
+    });
 
     // Some handlers may return an empty body, indicating that they have no reply to send.
-    if null_body(&raw_out) {
+    if null_body(&reply) {
         return;
     }
 
-    raw_out.push(b'\n');
-    out.lock()
+    rpc.send_reply(headers.dest, headers.src, headers.body.msg_id, &reply)
         .await
-        .write_all(&raw_out)
-        .await
-        .tap_err(|write_error| {
-            error!(?write_error, ?raw_out, "failed to write response to output")
-        })
-        .unwrap();
+        .tap_err(|write_error| error!(?write_error, ?reply, "failed to write response to output"))
+        .unwrap()
 }
 
 async fn init(
     ids: Arc<Mutex<Option<Sender<init::Ids>>>>,
     raw: String,
-) -> Result<Vec<u8>, Box<dyn StdError>> {
+) -> Result<serde_json::Value, Box<dyn StdError>> {
     let req: Message<init::Init> = serde_json::from_str(&raw)?;
-    let res = Message {
-        src: req.dest,
-        dest: req.src,
-        body: Body {
-            msg_id: None,
-            in_reply_to: req.body.msg_id,
-            body: init::init(ids, req.body.body).await,
-        },
-    };
-    serde_json::to_vec(&res)?.into_ok()
+    serde_json::to_value(&init::init(ids, req.body.body).await)?.into_ok()
 }
 
-async fn error<O>(rpc: Rpc<O>, raw: String) -> Result<(), Box<dyn StdError>>
+async fn error<O>(rpc: RpcWriter<O>, raw: String) -> Result<serde_json::Value, Box<dyn StdError>>
 where
     O: AsyncWrite + Send + Sync + Unpin + 'static,
 {
-    error::error(rpc, serde_json::from_str(&raw)?)
-        .await
-        .into_ok()
+    error::error(rpc, serde_json::from_str(&raw)?).await;
+    Ok(json!(null))
 }
 
-fn null_body(raw_out: &[u8]) -> bool {
-    serde_json::from_slice::<Message<Type>>(raw_out).is_err()
+fn null_body(raw_out: &serde_json::Value) -> bool {
+    raw_out == &json!(null)
 }
 
 #[cfg(test)]
 mod tests {
-    use rstest::rstest;
 
     use super::*;
-
-    #[rstest]
-    #[case(br#"{"src": "n1", "dest": "c1", "body": {} }"#)]
-    fn null_body_true(#[case] output: &[u8]) {
-        assert!(null_body(output));
-    }
-
-    #[rstest]
-    #[case(br#"{"src": "n1", "dest": "c1", "body": { "type": "init_ok" } }"#)]
-    fn null_body_false(#[case] output: &[u8]) {
-        assert!(!null_body(output));
-    }
 
     #[tokio::test]
     async fn default_node_handles_init() {
         let node = Node::builder().with_state(());
         node.run(
-                br#"{"src":"c1","dest":"n1","body":{"type":"init","node_id":"n1","node_ids":["n1","n2","n3"]}}"#
-                    .as_slice(),
-                tokio::io::stderr())
-            .await
-            .unwrap();
+            serde_json::to_vec(&json!({
+                "src": "c1",
+                "dest": "n1",
+                "body": {
+                    "msg_id": 1,
+                    "type": "init",
+                    "node_id": "n1",
+                    "node_ids": ["n1", "n2", "n3"],
+                },
+            }))
+            .unwrap()
+            .as_slice(),
+            tokio::io::stderr(),
+        )
+        .await
+        .unwrap();
 
         let ids: init::Ids = node.state.ids().await;
         assert_eq!(ids.id, "n1");

@@ -71,9 +71,7 @@ pub struct Message<B: FmtDebug> {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Body<B: FmtDebug> {
-    // TODO: make this field required
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub msg_id: Option<MsgId>,
+    pub msg_id: MsgId,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub in_reply_to: Option<MsgId>,
     #[serde(flatten)]

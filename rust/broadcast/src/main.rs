@@ -97,7 +97,7 @@ pub struct Broadcast {
 pub struct BroadcastOk {}
 
 #[instrument(skip(rpc, ids, state))]
-pub async fn broadcast<O>(rpc: Rpc<O>, ids: Ids, state: State, req: Broadcast) -> BroadcastOk
+pub async fn broadcast<O>(rpc: RpcWriter<O>, ids: Ids, state: State, req: Broadcast) -> BroadcastOk
 where
     O: AsyncWrite + Send + Sync + Unpin + 'static,
 {
@@ -113,13 +113,13 @@ where
 // |_|  \___| .__/|_|_|\___\__,_|\__\___|
 //          |_|
 
-async fn replicate_message<O>(rpc: Rpc<O>, ids: Ids, message: u64)
+async fn replicate_message<O>(rpc: RpcWriter<O>, ids: Ids, message: u64)
 where
     O: AsyncWrite + Send + Sync + Unpin + 'static,
 {
     for dest in ids.ids {
-        if &dest != &ids.id {
-            rpc.send(ids.id.clone(), dest, &Replicate { message })
+        if dest != ids.id {
+            rpc.send_rpc(ids.id.clone(), dest, &Replicate { message })
                 .await
                 .unwrap();
         }
