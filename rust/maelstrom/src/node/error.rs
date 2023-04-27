@@ -1,9 +1,8 @@
 use serde::{Deserialize, Serialize};
-use tokio::io::AsyncWrite;
 use tracing::*;
 
 use crate::message::Message;
-use crate::node::rpc::{Rpc, RpcWriter};
+use crate::node::rpc::Rpc;
 
 /// A maelstrom [error] message provides an error code and a descriptive error message.
 ///
@@ -16,10 +15,7 @@ pub struct Error {
 }
 
 #[instrument(skip(rpc))]
-pub async fn error<O>(rpc: RpcWriter<O>, msg: Message<Error>)
-where
-    O: AsyncWrite + Send + Sync + Unpin + 'static,
-{
+pub async fn error(rpc: impl Rpc, msg: Message<Error>) {
     if let Some(source_id) = msg.body.in_reply_to {
         rpc.notify_error(source_id, msg).await;
     } else {

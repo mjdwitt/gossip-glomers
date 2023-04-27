@@ -4,41 +4,40 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use tailsome::*;
-use tokio::io::AsyncWrite;
 
 use crate::message::{Message, Request, Response};
 use crate::node::init::Ids;
-use crate::node::rpc::RpcWriter;
+use crate::node::rpc;
 use crate::node::state::{FromRef, State};
 
 pub type RawResponse = Result<serde_json::Value, Box<dyn Error>>;
 
-pub trait ErasedHandler<O, S>: Send + Sync
+pub trait ErasedHandler<Rpc, S>: Send + Sync
 where
-    O: AsyncWrite + Unpin,
+    Rpc: Clone,
     S: Clone + FromRef<State<S>>,
 {
     fn call(
         self: Arc<Self>,
-        rpc: RpcWriter<O>,
+        rpc: Rpc,
         ids: Ids,
         state: S,
         raw_request: String,
     ) -> Pin<Box<dyn Future<Output = RawResponse> + Send>>;
 }
 
-impl<T, S, O, Req, Res, Fut> ErasedHandler<O, S> for Box<dyn Handler<T, S, O, Req, Res, Fut>>
+impl<T, S, Rpc, Req, Res, Fut> ErasedHandler<Rpc, S> for Box<dyn Handler<T, S, Rpc, Req, Res, Fut>>
 where
     T: 'static,
     S: FromRef<State<S>> + Clone + Send + Sync + 'static,
-    O: AsyncWrite + Send + Sync + Unpin + 'static,
+    Rpc: Clone + Send + Sync + 'static,
     Req: Request + 'static,
     Res: Response + 'static,
     Fut: Future<Output = Res> + Send + 'static,
 {
     fn call(
         self: Arc<Self>,
-        rpc: RpcWriter<O>,
+        rpc: Rpc,
         ids: Ids,
         state: S,
         raw_request: String,
@@ -52,62 +51,58 @@ where
     }
 }
 
-pub trait Handler<T, S, O, Req, Res, Fut>: Send + Sync
+pub trait Handler<T, S, Rpc, Req, Res, Fut>: Send + Sync
 where
-    O: AsyncWrite + Unpin,
     Fut: Future<Output = Res>,
 {
-    fn callf(&self, rpc: RpcWriter<O>, ids: Ids, state: S, req: Req) -> Fut;
+    fn callf(&self, rpc: Rpc, ids: Ids, state: S, req: Req) -> Fut;
 }
 
-impl<S, O, Req, Res, Fut, F> Handler<(RpcWriter<O>, Ids, S), S, O, Req, Res, Fut> for F
+impl<S, Rpc, Req, Res, Fut, F> Handler<(Rpc, Ids, S), S, Rpc, Req, Res, Fut> for F
 where
-    O: AsyncWrite + Unpin,
     Req: Request + 'static,
     Res: Response + 'static,
     Fut: Future<Output = Res> + Send,
-    F: Fn(RpcWriter<O>, Ids, S, Req) -> Fut + Clone + Send + Sync + 'static,
+    Rpc: rpc::Rpc,
+    F: Fn(Rpc, Ids, S, Req) -> Fut + Clone + Send + Sync + 'static,
 {
-    fn callf(&self, rpc: RpcWriter<O>, ids: Ids, state: S, req: Req) -> Fut {
+    fn callf(&self, rpc: Rpc, ids: Ids, state: S, req: Req) -> Fut {
         self(rpc, ids, state, req)
     }
 }
 
-impl<S, O, Req, Res, Fut, F> Handler<(Ids, S), S, O, Req, Res, Fut> for F
+impl<S, Rpc, Req, Res, Fut, F> Handler<(Ids, S), S, Rpc, Req, Res, Fut> for F
 where
-    O: AsyncWrite + Unpin,
     Req: Request + 'static,
     Res: Response + 'static,
     Fut: Future<Output = Res> + Send,
     F: Fn(Ids, S, Req) -> Fut + Clone + Send + Sync + 'static,
 {
-    fn callf(&self, _: RpcWriter<O>, ids: Ids, state: S, req: Req) -> Fut {
+    fn callf(&self, _: Rpc, ids: Ids, state: S, req: Req) -> Fut {
         self(ids, state, req)
     }
 }
 
-impl<S, O, Req, Res, Fut, F> Handler<(S,), S, O, Req, Res, Fut> for F
+impl<S, Rpc, Req, Res, Fut, F> Handler<(S,), S, Rpc, Req, Res, Fut> for F
 where
-    O: AsyncWrite + Unpin,
     Req: Request + 'static,
     Res: Response + 'static,
     Fut: Future<Output = Res> + Send,
     F: Fn(S, Req) -> Fut + Clone + Send + Sync + 'static,
 {
-    fn callf(&self, _: RpcWriter<O>, _: Ids, state: S, req: Req) -> Fut {
+    fn callf(&self, _: Rpc, _: Ids, state: S, req: Req) -> Fut {
         self(state, req)
     }
 }
 
-impl<S, O, Req, Res, Fut, F> Handler<(), S, O, Req, Res, Fut> for F
+impl<S, Rpc, Req, Res, Fut, F> Handler<(), S, Rpc, Req, Res, Fut> for F
 where
-    O: AsyncWrite + Unpin,
     Req: Request + 'static,
     Res: Response + 'static,
     Fut: Future<Output = Res> + Send,
     F: Fn(Req) -> Fut + Clone + Send + Sync + 'static,
 {
-    fn callf(&self, _: RpcWriter<O>, _: Ids, _: S, req: Req) -> Fut {
+    fn callf(&self, _: Rpc, _: Ids, _: S, req: Req) -> Fut {
         self(req)
     }
 }

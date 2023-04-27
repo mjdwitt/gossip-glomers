@@ -25,23 +25,23 @@ use error::Error;
 use rpc::{Rpc, RpcWriter};
 use state::{FromRef, RefInner, State};
 
-type RouteMap<O, S> = HashMap<String, Arc<dyn ErasedHandler<O, S>>>;
-type Routes<O, S> = Arc<RwLock<RouteMap<O, S>>>;
+type RouteMap<R, S> = HashMap<String, Arc<dyn ErasedHandler<R, S>>>;
+type Routes<R, S> = Arc<RwLock<RouteMap<R, S>>>;
 
-pub struct Node<O: AsyncWrite, S: Clone + FromRef<State<S>>> {
+pub struct Node<R: Rpc, S: Clone + FromRef<State<S>>> {
     ids: Arc<Mutex<Option<Sender<init::Ids>>>>,
     state: State<S>,
-    handlers: Routes<O, S>,
+    handlers: Routes<R, S>,
 }
 
 #[derive(Default)]
-pub struct NodeBuilder<O, S> {
-    handlers: RouteMap<O, S>,
+pub struct NodeBuilder<R, S> {
+    handlers: RouteMap<R, S>,
 }
 
-impl<O, S> NodeBuilder<O, S>
+impl<R, S> NodeBuilder<R, S>
 where
-    O: AsyncWrite + Send + Sync + Unpin + 'static,
+    R: Rpc + Clone + Send + Sync + Unpin + 'static,
     S: Clone + FromRef<State<S>>,
 {
     fn new() -> Self {
@@ -53,7 +53,7 @@ where
     pub fn handle<T, Req, Res, Fut>(
         mut self,
         type_: impl Into<String>,
-        handler: impl Handler<T, S, O, Req, Res, Fut> + 'static,
+        handler: impl Handler<T, S, R, Req, Res, Fut> + 'static,
     ) -> Self
     where
         T: 'static,
@@ -62,12 +62,12 @@ where
         Req: Request + 'static,
         Res: Response + 'static,
     {
-        let handler: Box<dyn Handler<T, S, O, Req, Res, Fut>> = Box::new(handler);
+        let handler: Box<dyn Handler<T, S, R, Req, Res, Fut>> = Box::new(handler);
         self.handlers.insert(type_.into(), Arc::new(handler));
         self
     }
 
-    pub fn with_state(self, app: S) -> Node<O, S> {
+    pub fn with_state(self, app: S) -> Node<R, S> {
         let (tx, rx) = tokio::sync::oneshot::channel();
         Node {
             state: State {
@@ -80,12 +80,12 @@ where
     }
 }
 
-impl<O, S> Node<O, S>
+impl<O, S> Node<RpcWriter<O>, S>
 where
     O: AsyncWrite + Send + Sync + Unpin + 'static,
     S: FromRef<State<S>> + Clone + Default + Send + Sync + 'static,
 {
-    pub fn builder() -> NodeBuilder<O, S> {
+    pub fn builder() -> NodeBuilder<RpcWriter<O>, S> {
         NodeBuilder::new()
     }
 
@@ -122,14 +122,14 @@ where
     }
 }
 
-async fn run<O, S>(
-    handlers: Routes<O, S>,
+async fn run<R, S>(
+    handlers: Routes<R, S>,
     state: State<S>,
     ids: Arc<Mutex<Option<Sender<init::Ids>>>>,
-    rpc: RpcWriter<O>,
+    rpc: R,
     raw: String,
 ) where
-    O: AsyncWrite + Send + Sync + Unpin + 'static,
+    R: Rpc + Clone + Send + Sync + Unpin + 'static,
     S: FromRef<State<S>> + Clone + Send + Sync + 'static,
 {
     let headers: Message<Type> = serde_json::from_str(&raw)
@@ -189,9 +189,9 @@ async fn init(
     serde_json::to_value(&init::init(ids, req.body.body).await)?.into_ok()
 }
 
-async fn error<O>(rpc: RpcWriter<O>, raw: String) -> Result<serde_json::Value, Box<dyn StdError>>
+async fn error<R>(rpc: R, raw: String) -> Result<serde_json::Value, Box<dyn StdError>>
 where
-    O: AsyncWrite + Send + Sync + Unpin + 'static,
+    R: Rpc + Send + Sync + Unpin + 'static,
 {
     error::error(rpc, serde_json::from_str(&raw)?).await;
     Ok(json!(null))
