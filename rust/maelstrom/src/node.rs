@@ -186,7 +186,7 @@ async fn init(
     raw: String,
 ) -> Result<serde_json::Value, Box<dyn StdError>> {
     let req: Message<init::Init> = serde_json::from_str(&raw)?;
-    serde_json::to_value(&init::init(ids, req.body.body).await)?.into_ok()
+    serde_json::to_value(init::init(ids, req.body.body).await)?.into_ok()
 }
 
 async fn error<R>(rpc: R, raw: String) -> Result<serde_json::Value, Box<dyn StdError>>
