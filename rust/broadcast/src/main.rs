@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 
 use maelstrom::prelude::*;
 use runtime::prelude::*;
@@ -26,7 +26,7 @@ async fn main() -> Result<()> {
 
 #[derive(Clone, Default)]
 pub struct State {
-    messages: Arc<RwLock<Vec<u64>>>,
+    messages: Arc<RwLock<BTreeSet<u64>>>,
     topology: Arc<RwLock<HashMap<NodeId, Vec<NodeId>>>>,
 }
 
@@ -64,7 +64,7 @@ pub async fn topology(state: State, req: Topology) -> TopologyOk {
 pub struct Read {}
 
 impl Read {
-    fn ok(self, messages: Vec<u64>) -> ReadOk {
+    fn ok(self, messages: BTreeSet<u64>) -> ReadOk {
         ReadOk { messages }
     }
 }
@@ -72,7 +72,7 @@ impl Read {
 #[derive(Debug, Default, Serialize)]
 #[serde(tag = "type", rename = "read_ok")]
 pub struct ReadOk {
-    messages: Vec<u64>,
+    messages: BTreeSet<u64>,
 }
 
 #[instrument(skip(state))]
@@ -98,7 +98,7 @@ pub struct BroadcastOk {}
 
 #[instrument(skip(rpc, ids, state))]
 pub async fn broadcast(rpc: impl Rpc, ids: Ids, state: State, req: Broadcast) -> BroadcastOk {
-    state.messages.write().await.push(req.message);
+    state.messages.write().await.insert(req.message);
     replicate_message(rpc, ids, req.message).await;
     BroadcastOk {}
 }
@@ -138,7 +138,7 @@ pub struct ReplicateOk {}
 
 #[instrument(skip(state))]
 pub async fn replicate(state: State, req: Replicate) -> ReplicateOk {
-    state.messages.write().await.push(req.message);
+    state.messages.write().await.insert(req.message);
     req.ok()
 }
 
