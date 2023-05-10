@@ -5,18 +5,21 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
+use async_trait::async_trait;
 use serde::ser::Serialize;
 use serde_json::Value as Json;
 use tailsome::*;
 use tap::prelude::*;
 use tokio::io::{AsyncWrite, AsyncWriteExt};
 use tokio::sync::{Mutex, RwLock};
+use tokio::task::JoinSet;
 use tracing::*;
 
 use crate::message::{Body, Message, MsgId, NodeId};
 use crate::node::error::Error;
+use crate::node::signal::{Signal, TimedSignal};
 
-#[async_trait::async_trait]
+#[async_trait]
 pub trait Rpc {
     /// Attempts to build and send a reply message, giving up if it fails anywhere.
     async fn send_reply<B: Serialize + Debug + Send + Sync>(
@@ -42,25 +45,46 @@ pub trait Rpc {
     async fn notify_error(&self, source_id: MsgId, err: Message<Error>) -> Option<MsgId>;
 }
 
-pub struct RpcWriter<O> {
-    out: Arc<Mutex<O>>,
+pub type ProdRpc<O> = RpcWriter<O, TimedSignal>;
 
+pub struct RpcWriter<O, R> {
+    out: Arc<Mutex<O>>,
     next_id: Arc<AtomicU64>,
     pending: Arc<RwLock<HashMap<MsgId, Json>>>,
+    tasks: Arc<Mutex<JoinSet<Result<(), std::io::Error>>>>,
+    resend: R,
 }
 
-impl<O> Clone for RpcWriter<O> {
+impl<O> ProdRpc<O> {
+    pub fn new(out: Arc<Mutex<O>>) -> Self {
+        Self {
+            out,
+            next_id: Default::default(),
+            pending: Default::default(),
+            tasks: Default::default(),
+            resend: TimedSignal::new(Duration::from_millis(500)),
+        }
+    }
+}
+
+impl<O, R: Clone> Clone for RpcWriter<O, R> {
     fn clone(&self) -> Self {
         Self {
             out: self.out.clone(),
             next_id: self.next_id.clone(),
             pending: self.pending.clone(),
+            resend: self.resend.clone(),
+            tasks: self.tasks.clone(),
         }
     }
 }
 
-#[async_trait::async_trait]
-impl<O: AsyncWrite + Send + Sync + Unpin + 'static> Rpc for RpcWriter<O> {
+#[async_trait]
+impl<O, R> Rpc for RpcWriter<O, R>
+where
+    O: AsyncWrite + Send + Sync + Unpin + 'static,
+    R: Signal + Clone + Send + Sync + 'static,
+{
     async fn send_reply<B: Serialize + Debug + Send + Sync>(
         &self,
         src: NodeId,
@@ -68,10 +92,11 @@ impl<O: AsyncWrite + Send + Sync + Unpin + 'static> Rpc for RpcWriter<O> {
         in_reply_to: MsgId,
         body: B,
     ) -> Result<(), Box<dyn StdError + Send + Sync + 'static>> {
-        let (_, msg) = self
+        let (_, reply) = self
             .serialize_message(src, dest, Some(in_reply_to), body)
             .await?;
-        self.write_message(&msg).await?.into_ok()
+        debug!(?reply, "send_reply");
+        self.write_message(&reply).await?.into_ok()
     }
 
     async fn send_rpc<B: Serialize + Debug + Send + Sync>(
@@ -86,7 +111,7 @@ impl<O: AsyncWrite + Send + Sync + Unpin + 'static> Rpc for RpcWriter<O> {
             pending.insert(msg_id, msg.clone());
             debug!(?pending, "send_rpc");
         }
-        tokio::spawn(self.clone().ensure_sent(msg_id, msg));
+        self.ensure_sent(msg_id, msg).await;
         Ok(())
     }
 
@@ -118,15 +143,11 @@ impl<O: AsyncWrite + Send + Sync + Unpin + 'static> Rpc for RpcWriter<O> {
     }
 }
 
-impl<O: AsyncWrite + Send + Sync + Unpin + 'static> RpcWriter<O> {
-    pub fn new(out: Arc<Mutex<O>>) -> Self {
-        Self {
-            out,
-            next_id: Default::default(),
-            pending: Default::default(),
-        }
-    }
-
+impl<O, R> RpcWriter<O, R>
+where
+    O: AsyncWrite + Send + Sync + Unpin + 'static,
+    R: Signal + Clone + Send + Sync + 'static,
+{
     async fn serialize_message<B: Serialize + Debug + Send + Sync>(
         &self,
         src: NodeId,
@@ -158,27 +179,125 @@ impl<O: AsyncWrite + Send + Sync + Unpin + 'static> RpcWriter<O> {
             .into_ok()
     }
 
-    async fn ensure_sent(self, msg_id: MsgId, msg: Json) -> Result<(), std::io::Error> {
+    async fn ensure_sent(&self, msg_id: MsgId, msg: Json) {
+        let res = self.write_message(&msg).await;
+        debug!(?msg_id, ?msg, "sending guaranteed rpc");
+        self.tasks
+            .lock()
+            .await
+            .spawn(self.clone().resend_loop(msg_id, msg, res));
+    }
+
+    async fn resend_loop(
+        self,
+        msg_id: MsgId,
+        msg: Json,
+        mut res: Result<(), std::io::Error>,
+    ) -> Result<(), std::io::Error> {
         loop {
-            if self.write_message(&msg).await.is_err()
-                || self.pending.read().await.contains_key(&msg_id)
-            {
-                tokio::time::sleep(Duration::from_millis(500)).await;
+            self.resend.signal().await;
+
+            if res.is_err() || self.pending.read().await.contains_key(&msg_id) {
+                debug!(?msg_id, ?msg, "resending un-ack'd rpc");
+                res = self.write_message(&msg).await;
             } else {
-                break;
+                return Ok(());
             }
         }
+    }
+}
 
-        Ok(())
+impl<O: Debug, R> RpcWriter<O, R> {
+    #[cfg(test)]
+    async fn graceful_stop(self) {
+        let RpcWriter { tasks, .. } = self;
+        {
+            let mut tasks = tasks.lock().await;
+            while let Some(_) = tasks.join_next().await {}
+        }
+        Arc::try_unwrap(tasks).unwrap();
+    }
+
+    #[cfg(test)]
+    async fn abort(self) -> O {
+        let mut tasks = self.tasks.lock().await;
+        tasks.abort_all();
+        while let Some(_) = tasks.join_next().await {}
+        Arc::try_unwrap(self.out).unwrap().into_inner()
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::io::BufRead;
+
     use rstest::rstest;
     use serde_json::json;
+    use tokio::io::{AsyncBufReadExt, BufReader};
 
     use super::*;
+    use crate::node::signal::Never;
+
+    #[tokio::test]
+    async fn send_rpc_writes_message_with_id() {
+        let (rx, tx) = tokio::io::duplex(64);
+        let rpc = RpcWriter {
+            out: Arc::new(Mutex::new(tx)),
+            next_id: Default::default(),
+            pending: Default::default(),
+            tasks: Default::default(),
+            resend: Never,
+        };
+
+        rpc.send_rpc("n1".into(), "n2".into(), ()).await.unwrap();
+
+        let mut rx = BufReader::new(rx);
+        let mut buf = String::new();
+        rx.read_line(&mut buf).await.unwrap();
+        assert_eq!(
+            serde_json::from_str::<Json>(&buf).unwrap(),
+            json!({
+                "src": "n1",
+                "dest": "n2",
+                "body": { "msg_id": 0 },
+            }),
+        );
+    }
+
+    #[tokio::test]
+    async fn replies_and_rpcs_use_incrementing_message_ids() {
+        let out = Arc::new(Mutex::new(Vec::new()));
+
+        let rpc = RpcWriter {
+            out,
+            next_id: Arc::new(AtomicU64::new(0)),
+            pending: Default::default(),
+            tasks: Default::default(),
+            resend: Never,
+        };
+
+        for _ in 0..10 {
+            rpc.send_rpc("n1".into(), "n2".into(), ()).await.unwrap();
+            rpc.send_reply("n1".into(), "n2".into(), 7.into(), ())
+                .await
+                .unwrap();
+        }
+
+        assert!(rpc
+            .abort()
+            .await
+            .as_slice()
+            .pipe(BufRead::lines)
+            .inspect(|line| debug!(?line))
+            .map(|line| -> u64 {
+                serde_json::from_str::<Message<()>>(&line.unwrap())
+                    .unwrap()
+                    .body
+                    .msg_id
+                    .into()
+            })
+            .eq(0..20));
+    }
 
     fn msg(id: impl Into<MsgId>, re: impl Into<MsgId>) -> Message<Json> {
         Message {
@@ -222,6 +341,8 @@ mod tests {
             out: Arc::new(Mutex::new(tokio::io::sink())),
             next_id: Default::default(),
             pending: pending.clone(),
+            tasks: Default::default(),
+            resend: Never,
         };
 
         assert!(pending.read().await.contains_key(&1.into()));
@@ -237,6 +358,8 @@ mod tests {
             out: Arc::new(Mutex::new(tokio::io::sink())),
             next_id: Default::default(),
             pending: pending.clone(),
+            tasks: Default::default(),
+            resend: Never,
         };
 
         assert!(pending.read().await.contains_key(&1.into()));
@@ -245,5 +368,35 @@ mod tests {
             Some(1.into())
         );
         assert!(pending.read().await.contains_key(&1.into()));
+    }
+
+    #[tokio::test]
+    async fn rpcs_are_resent_until_notified_ok() {
+        let (read, write) = tokio::io::duplex(4096);
+        let (resend, signal) = tokio::sync::mpsc::channel::<()>(1);
+
+        let rpc = RpcWriter {
+            out: Arc::new(Mutex::new(write)),
+            next_id: Default::default(),
+            pending: Default::default(),
+            tasks: Default::default(),
+            resend: Arc::new(Mutex::new(signal)),
+        };
+
+        rpc.send_rpc("n1".into(), "n2".into(), ()).await.unwrap();
+        assert_eq!(rpc.pending.read().await.len(), 1);
+
+        let mut lines = BufReader::new(read).lines();
+        let _: String = lines.next_line().await.unwrap().unwrap();
+
+        resend.send(()).await.unwrap();
+        let _: String = lines.next_line().await.unwrap().unwrap();
+
+        rpc.notify_ok(0.into(), msg(2, 1)).await;
+        assert_eq!(rpc.pending.read().await.len(), 0);
+
+        resend.send(()).await.unwrap();
+        rpc.graceful_stop().await;
+        assert_eq!(lines.next_line().await.unwrap(), None);
     }
 }

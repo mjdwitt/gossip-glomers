@@ -19,10 +19,11 @@ use crate::message::{Message, Request, Response, Type};
 pub mod error;
 pub mod init;
 pub mod rpc;
+pub mod signal;
 pub mod state;
 
 use error::Error;
-use rpc::{Rpc, RpcWriter};
+use rpc::{ProdRpc, Rpc};
 use state::{FromRef, RefInner, State};
 
 type RouteMap<R, S> = HashMap<String, Arc<dyn ErasedHandler<R, S>>>;
@@ -80,12 +81,12 @@ where
     }
 }
 
-impl<O, S> Node<RpcWriter<O>, S>
+impl<O, S> Node<ProdRpc<O>, S>
 where
     O: AsyncWrite + Send + Sync + Unpin + 'static,
     S: FromRef<State<S>> + Clone + Default + Send + Sync + 'static,
 {
-    pub fn builder() -> NodeBuilder<RpcWriter<O>, S> {
+    pub fn builder() -> NodeBuilder<ProdRpc<O>, S> {
         NodeBuilder::new()
     }
 
@@ -103,7 +104,7 @@ where
                 self.handlers.clone(),
                 self.state.clone(),
                 self.ids.clone(),
-                RpcWriter::new(o.clone()),
+                ProdRpc::new(o.clone()),
                 line,
             ));
         }

@@ -59,6 +59,12 @@ impl From<u64> for MsgId {
     }
 }
 
+impl Into<u64> for MsgId {
+    fn into(self) -> u64 {
+        self.0
+    }
+}
+
 /// A [message] has a source, destination, and a body.
 ///
 /// [message]: https://github.com/jepsen-io/maelstrom/blob/main/doc/protocol.md#messages
