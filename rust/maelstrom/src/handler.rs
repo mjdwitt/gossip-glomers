@@ -44,8 +44,8 @@ where
     ) -> Pin<Box<dyn Future<Output = RawResponse> + Send>> {
         let h = self.clone();
         Box::pin(async move {
-            let req: Message<Req> = serde_json::from_str(&raw_request)?;
-            let res = h.callf(rpc, ids, state, req.body.body).await;
+            let msg: Message<Req> = serde_json::from_str(&raw_request)?;
+            let res = h.callf(rpc, ids, state, msg).await;
             serde_json::to_value(&res)?.into_ok()
         })
     }
@@ -53,12 +53,13 @@ where
 
 pub trait Handler<T, S, Rpc, Req, Res, Fut>: Send + Sync
 where
+    Req: Request,
     Fut: Future<Output = Res>,
 {
-    fn callf(&self, rpc: Rpc, ids: Ids, state: S, req: Req) -> Fut;
+    fn callf(&self, rpc: Rpc, ids: Ids, state: S, msg: Message<Req>) -> Fut;
 }
 
-impl<S, Rpc, Req, Res, Fut, F> Handler<(Rpc, Ids, S), S, Rpc, Req, Res, Fut> for F
+impl<S, Rpc, Req, Res, Fut, F> Handler<(Rpc, Ids, S, Req), S, Rpc, Req, Res, Fut> for F
 where
     Req: Request + 'static,
     Res: Response + 'static,
@@ -66,43 +67,91 @@ where
     Rpc: rpc::Rpc,
     F: Fn(Rpc, Ids, S, Req) -> Fut + Clone + Send + Sync + 'static,
 {
-    fn callf(&self, rpc: Rpc, ids: Ids, state: S, req: Req) -> Fut {
-        self(rpc, ids, state, req)
+    fn callf(&self, rpc: Rpc, ids: Ids, state: S, msg: Message<Req>) -> Fut {
+        self(rpc, ids, state, msg.headers.body)
     }
 }
 
-impl<S, Rpc, Req, Res, Fut, F> Handler<(Ids, S), S, Rpc, Req, Res, Fut> for F
+impl<S, Rpc, Req, Res, Fut, F> Handler<(Rpc, Ids, S, Message<Req>), S, Rpc, Req, Res, Fut> for F
+where
+    Req: Request + 'static,
+    Res: Response + 'static,
+    Fut: Future<Output = Res> + Send,
+    F: Fn(Rpc, Ids, S, Message<Req>) -> Fut + Clone + Send + Sync + 'static,
+{
+    fn callf(&self, rpc: Rpc, ids: Ids, state: S, msg: Message<Req>) -> Fut {
+        self(rpc, ids, state, msg)
+    }
+}
+
+impl<S, Rpc, Req, Res, Fut, F> Handler<(Ids, S, Req), S, Rpc, Req, Res, Fut> for F
 where
     Req: Request + 'static,
     Res: Response + 'static,
     Fut: Future<Output = Res> + Send,
     F: Fn(Ids, S, Req) -> Fut + Clone + Send + Sync + 'static,
 {
-    fn callf(&self, _: Rpc, ids: Ids, state: S, req: Req) -> Fut {
-        self(ids, state, req)
+    fn callf(&self, _: Rpc, ids: Ids, state: S, msg: Message<Req>) -> Fut {
+        self(ids, state, msg.headers.body)
     }
 }
 
-impl<S, Rpc, Req, Res, Fut, F> Handler<(S,), S, Rpc, Req, Res, Fut> for F
+impl<S, Rpc, Req, Res, Fut, F> Handler<(Ids, S, Message<Req>), S, Rpc, Req, Res, Fut> for F
+where
+    Req: Request + 'static,
+    Res: Response + 'static,
+    Fut: Future<Output = Res> + Send,
+    F: Fn(Ids, S, Message<Req>) -> Fut + Clone + Send + Sync + 'static,
+{
+    fn callf(&self, _: Rpc, ids: Ids, state: S, msg: Message<Req>) -> Fut {
+        self(ids, state, msg)
+    }
+}
+
+impl<S, Rpc, Req, Res, Fut, F> Handler<(S, Req), S, Rpc, Req, Res, Fut> for F
 where
     Req: Request + 'static,
     Res: Response + 'static,
     Fut: Future<Output = Res> + Send,
     F: Fn(S, Req) -> Fut + Clone + Send + Sync + 'static,
 {
-    fn callf(&self, _: Rpc, _: Ids, state: S, req: Req) -> Fut {
-        self(state, req)
+    fn callf(&self, _: Rpc, _: Ids, state: S, msg: Message<Req>) -> Fut {
+        self(state, msg.headers.body)
     }
 }
 
-impl<S, Rpc, Req, Res, Fut, F> Handler<(), S, Rpc, Req, Res, Fut> for F
+impl<S, Rpc, Req, Res, Fut, F> Handler<(S, Message<Req>), S, Rpc, Req, Res, Fut> for F
+where
+    Req: Request + 'static,
+    Res: Response + 'static,
+    Fut: Future<Output = Res> + Send,
+    F: Fn(S, Message<Req>) -> Fut + Clone + Send + Sync + 'static,
+{
+    fn callf(&self, _: Rpc, _: Ids, state: S, msg: Message<Req>) -> Fut {
+        self(state, msg)
+    }
+}
+
+impl<S, Rpc, Req, Res, Fut, F> Handler<(Req,), S, Rpc, Req, Res, Fut> for F
 where
     Req: Request + 'static,
     Res: Response + 'static,
     Fut: Future<Output = Res> + Send,
     F: Fn(Req) -> Fut + Clone + Send + Sync + 'static,
 {
-    fn callf(&self, _: Rpc, _: Ids, _: S, req: Req) -> Fut {
-        self(req)
+    fn callf(&self, _: Rpc, _: Ids, _: S, msg: Message<Req>) -> Fut {
+        self(msg.headers.body)
+    }
+}
+
+impl<S, Rpc, Req, Res, Fut, F> Handler<(Message<Req>,), S, Rpc, Req, Res, Fut> for F
+where
+    Req: Request + 'static,
+    Res: Response + 'static,
+    Fut: Future<Output = Res> + Send,
+    F: Fn(Message<Req>) -> Fut + Clone + Send + Sync + 'static,
+{
+    fn callf(&self, _: Rpc, _: Ids, _: S, msg: Message<Req>) -> Fut {
+        self(msg)
     }
 }
