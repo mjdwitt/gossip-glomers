@@ -15,7 +15,7 @@ use tokio::sync::{Mutex, RwLock};
 use tokio::task::JoinSet;
 use tracing::*;
 
-use crate::message::{Body, Message, MsgId, NodeId};
+use crate::message::{Headers, Message, MsgId, NodeId};
 use crate::node::error::Error;
 use crate::node::signal::{Signal, TimedSignal};
 
@@ -159,7 +159,7 @@ where
         let msg = serde_json::to_value(&Message {
             src,
             dest,
-            body: Body {
+            headers: Headers {
                 msg_id,
                 in_reply_to,
                 body,
@@ -292,7 +292,7 @@ mod tests {
             .map(|line| -> u64 {
                 serde_json::from_str::<Message<()>>(&line.unwrap())
                     .unwrap()
-                    .body
+                    .headers
                     .msg_id
                     .into()
             })
@@ -303,7 +303,7 @@ mod tests {
         Message {
             src: "c1".into(),
             dest: "n1".into(),
-            body: Body {
+            headers: Headers {
                 msg_id: id.into(),
                 in_reply_to: Some(re.into()),
                 body: json!(null),
@@ -315,7 +315,7 @@ mod tests {
         Message {
             src: "c1".into(),
             dest: "n1".into(),
-            body: Body {
+            headers: Headers {
                 msg_id: id.into(),
                 in_reply_to: Some(re.into()),
                 body: Error {

@@ -72,11 +72,12 @@ impl Into<u64> for MsgId {
 pub struct Message<B: FmtDebug> {
     pub src: NodeId,
     pub dest: NodeId,
-    pub body: Body<B>,
+    #[serde(rename = "body")]
+    pub headers: Headers<B>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct Body<B: FmtDebug> {
+pub struct Headers<B: FmtDebug> {
     pub msg_id: MsgId,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub in_reply_to: Option<MsgId>,
@@ -86,7 +87,7 @@ pub struct Body<B: FmtDebug> {
 
 impl<B: FmtDebug> Message<B> {
     pub fn body(&self) -> &B {
-        &self.body.body
+        &self.headers.body
     }
 }
 

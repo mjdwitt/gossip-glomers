@@ -142,11 +142,11 @@ async fn run<R, S>(
         })
         .unwrap();
 
-    let reply = match headers.body.body.type_.as_str() {
+    let reply = match headers.headers.body.type_.as_str() {
         "init" => init(ids, raw).await,
         "error" => error(rpc.clone(), raw).await,
         _ => {
-            if let Some(source_id) = headers.body.in_reply_to {
+            if let Some(source_id) = headers.headers.in_reply_to {
                 if let Ok(msg) = serde_json::from_str(&raw) {
                     rpc.notify_ok(source_id, msg).await;
                 }
@@ -176,7 +176,7 @@ async fn run<R, S>(
         return;
     }
 
-    rpc.send_reply(headers.dest, headers.src, headers.body.msg_id, &reply)
+    rpc.send_reply(headers.dest, headers.src, headers.headers.msg_id, &reply)
         .await
         .tap_err(|write_error| error!(?write_error, ?reply, "failed to write response to output"))
         .unwrap()
@@ -187,7 +187,7 @@ async fn init(
     raw: String,
 ) -> Result<serde_json::Value, Box<dyn StdError>> {
     let req: Message<init::Init> = serde_json::from_str(&raw)?;
-    serde_json::to_value(init::init(ids, req.body.body).await)?.into_ok()
+    serde_json::to_value(init::init(ids, req.headers.body).await)?.into_ok()
 }
 
 async fn error<R>(rpc: R, raw: String) -> Result<serde_json::Value, Box<dyn StdError>>

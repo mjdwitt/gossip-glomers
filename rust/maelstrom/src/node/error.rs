@@ -16,7 +16,7 @@ pub struct Error {
 
 #[instrument(skip(rpc))]
 pub async fn error(rpc: impl Rpc, msg: Message<Error>) {
-    if let Some(source_id) = msg.body.in_reply_to {
+    if let Some(source_id) = msg.headers.in_reply_to {
         rpc.notify_error(source_id, msg).await;
     } else {
         error!(?msg, "received an error message");
