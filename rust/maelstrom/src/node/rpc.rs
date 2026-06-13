@@ -80,7 +80,7 @@ impl<O> ProdRpc<O> {
             pending: Default::default(),
             peer_tasks: Default::default(),
             pokes: Default::default(),
-            resend: TimedSignal::new(Duration::from_millis(500)),
+            resend: TimedSignal::new(Duration::from_millis(350)),
         }
     }
 }
@@ -247,11 +247,17 @@ where
 
     async fn peer_loop(self, dest: NodeId, poke: Arc<Notify>) {
         let batch_capable = dest.as_ref().starts_with('n');
-        let throttle = Duration::from_millis(250);
         loop {
-            tokio::select! {
-                _ = self.resend.signal() => {}
-                _ = poke.notified() => {}
+            if batch_capable {
+                // Pure timer-driven for nodes — every tick we ship a single envelope carrying
+                // everything outstanding. The receiver dedupes inner bodies; the timer is also
+                // the retry mechanism under partition.
+                self.resend.signal().await;
+            } else {
+                tokio::select! {
+                    _ = self.resend.signal() => {}
+                    _ = poke.notified() => {}
+                }
             }
 
             let (src, bodies) = self.snapshot_for(&dest).await;
@@ -268,8 +274,6 @@ where
                 if let Err(e) = self.write_message(&msg).await {
                     error!(?e, ?dest, "peer_loop write failed");
                 }
-                // Throttle the *next* send so subsequent pokes coalesce into one batch.
-                tokio::time::sleep(throttle).await;
             } else {
                 for body in bodies {
                     let msg = envelope_single(&src, &dest, body);
