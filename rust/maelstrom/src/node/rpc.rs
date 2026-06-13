@@ -165,7 +165,8 @@ where
         let msg = if bodies.len() == 1 {
             envelope_single(&src, &dest, bodies.into_iter().next().unwrap())
         } else {
-            envelope_batch(&src, &dest, bodies)
+            let envelope_id: MsgId = self.next_id.fetch_add(1, Ordering::SeqCst).into();
+            envelope_batch(&src, &dest, envelope_id, bodies)
         };
         self.write_message(&msg).await?.into_ok()
     }
@@ -261,7 +262,8 @@ where
             debug!(?dest, count = bodies.len(), "peer_loop flush");
 
             if batch_capable {
-                let msg = envelope_batch(&src, &dest, bodies);
+                let envelope_id: MsgId = self.next_id.fetch_add(1, Ordering::SeqCst).into();
+                let msg = envelope_batch(&src, &dest, envelope_id, bodies);
                 if let Err(e) = self.write_message(&msg).await {
                     error!(?e, ?dest, "peer_loop write failed");
                 }
@@ -300,12 +302,13 @@ fn envelope_single(src: &NodeId, dest: &NodeId, body: Json) -> Json {
     })
 }
 
-fn envelope_batch(src: &NodeId, dest: &NodeId, bodies: Vec<Json>) -> Json {
+fn envelope_batch(src: &NodeId, dest: &NodeId, msg_id: MsgId, bodies: Vec<Json>) -> Json {
     json!({
         "src": src,
         "dest": dest,
         "body": {
             "type": "batch",
+            "msg_id": msg_id,
             "bodies": bodies,
         },
     })
