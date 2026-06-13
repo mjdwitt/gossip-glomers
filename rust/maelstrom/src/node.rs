@@ -95,6 +95,7 @@ where
         I: AsyncRead + Send + Sync + Unpin,
     {
         let o = Arc::new(Mutex::new(o));
+        let rpc = ProdRpc::new(o.clone());
         let mut lines = BufReader::new(i).lines();
         let mut requests = JoinSet::new();
 
@@ -104,7 +105,7 @@ where
                 self.handlers.clone(),
                 self.state.clone(),
                 self.ids.clone(),
-                ProdRpc::new(o.clone()),
+                rpc.clone(),
                 line,
             ));
         }
