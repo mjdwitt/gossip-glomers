@@ -247,16 +247,11 @@ where
 
     async fn peer_loop(self, dest: NodeId, poke: Arc<Notify>) {
         let batch_capable = dest.as_ref().starts_with('n');
-        let coalesce = Duration::from_millis(150);
+        let throttle = Duration::from_millis(250);
         loop {
             tokio::select! {
                 _ = self.resend.signal() => {}
-                _ = poke.notified() => {
-                    // Let other sends pile up so this batch is fatter.
-                    if batch_capable {
-                        tokio::time::sleep(coalesce).await;
-                    }
-                }
+                _ = poke.notified() => {}
             }
 
             let (src, bodies) = self.snapshot_for(&dest).await;
@@ -273,6 +268,8 @@ where
                 if let Err(e) = self.write_message(&msg).await {
                     error!(?e, ?dest, "peer_loop write failed");
                 }
+                // Throttle the *next* send so subsequent pokes coalesce into one batch.
+                tokio::time::sleep(throttle).await;
             } else {
                 for body in bodies {
                     let msg = envelope_single(&src, &dest, body);
