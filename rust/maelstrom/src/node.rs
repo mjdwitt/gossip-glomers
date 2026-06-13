@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use futures::FutureExt;
 use serde_json::json;
+use serde_json::Value as Json;
 use tailsome::*;
 use tap::prelude::*;
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, BufReader};
@@ -14,7 +15,7 @@ use tokio::task::JoinSet;
 use tracing::*;
 
 use crate::handler::{ErasedHandler, Handler};
-use crate::message::{Message, Request, Response, Type};
+use crate::message::{Message, MsgId, NodeId, Request, Response, Type};
 
 pub mod error;
 pub mod init;
@@ -143,6 +144,11 @@ async fn run<R, S>(
         })
         .unwrap();
 
+    if headers.headers.body.type_ == "batch" {
+        dispatch_batch(handlers, state, rpc, raw).await;
+        return;
+    }
+
     let reply = match headers.headers.body.type_.as_str() {
         "init" => init(ids, raw).await,
         "error" => error(rpc.clone(), raw).await,
@@ -181,6 +187,119 @@ async fn run<R, S>(
         .await
         .tap_err(|write_error| error!(?write_error, ?reply, "failed to write response to output"))
         .unwrap()
+}
+
+async fn dispatch_batch<R, S>(
+    handlers: Routes<R, S>,
+    state: State<S>,
+    rpc: R,
+    raw: String,
+) where
+    R: Rpc + Clone + Send + Sync + Unpin + 'static,
+    S: FromRef<State<S>> + Clone + Send + Sync + 'static,
+{
+    let full: Json = match serde_json::from_str(&raw) {
+        Ok(v) => v,
+        Err(e) => {
+            error!(?e, "failed to deserialize batch envelope");
+            return;
+        }
+    };
+    let src: NodeId = match serde_json::from_value(full["src"].clone()) {
+        Ok(v) => v,
+        Err(e) => {
+            error!(?e, "batch envelope missing src");
+            return;
+        }
+    };
+    let dest: NodeId = match serde_json::from_value(full["dest"].clone()) {
+        Ok(v) => v,
+        Err(e) => {
+            error!(?e, "batch envelope missing dest");
+            return;
+        }
+    };
+    let bodies = full["body"]["bodies"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+
+    let mut replies: Vec<(MsgId, Json)> = Vec::new();
+    for inner in bodies {
+        if let Some(reply) =
+            dispatch_inner(&handlers, &state, &rpc, &src, &dest, inner.clone()).await
+        {
+            if let Some(msg_id) = inner.get("msg_id").and_then(|v| {
+                serde_json::from_value::<MsgId>(v.clone()).ok()
+            }) {
+                replies.push((msg_id, reply));
+            }
+        }
+    }
+
+    if let Err(e) = rpc.send_replies(dest, src, replies).await {
+        error!(?e, "failed to write batched replies");
+    }
+}
+
+async fn dispatch_inner<R, S>(
+    handlers: &Routes<R, S>,
+    state: &State<S>,
+    rpc: &R,
+    src: &NodeId,
+    dest: &NodeId,
+    inner_body: Json,
+) -> Option<Json>
+where
+    R: Rpc + Clone + Send + Sync + Unpin + 'static,
+    S: FromRef<State<S>> + Clone + Send + Sync + 'static,
+{
+    // If the inner body is a reply, notify the rpc system. We still fall through to the
+    // handler dispatch because handlers may be registered for *_ok types.
+    if let Some(source_id) = inner_body
+        .get("in_reply_to")
+        .and_then(|v| serde_json::from_value::<MsgId>(v.clone()).ok())
+    {
+        let synthetic = json!({
+            "src": src,
+            "dest": dest,
+            "body": inner_body.clone(),
+        });
+        if let Ok(msg) = serde_json::from_value::<Message<Json>>(synthetic) {
+            rpc.notify_ok(source_id, msg).await;
+        }
+    }
+
+    let inner_type = inner_body.get("type").and_then(|t| t.as_str())?.to_string();
+    let synthetic_raw = json!({
+        "src": src,
+        "dest": dest,
+        "body": inner_body,
+    })
+    .to_string();
+
+    let handlers_guard = handlers.read().await;
+    let handler = handlers_guard.get(&inner_type).cloned();
+    drop(handlers_guard);
+
+    let handler = handler?;
+
+    let reply = handler
+        .call(rpc.clone(), state.ids().await, state.inner(), synthetic_raw)
+        .await
+        .unwrap_or_else(|err| {
+            serde_json::to_value(&Error {
+                code: 13,
+                text: err.to_string(),
+            })
+            .unwrap()
+        });
+
+    if null_body(&reply) {
+        None
+    } else {
+        Some(reply)
+    }
 }
 
 async fn init(
