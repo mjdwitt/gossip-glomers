@@ -17,6 +17,7 @@ tokio = { version = "1.26.0", features = ["rt", "io-util", "sync", "time", "macr
 tracing = "0.1.37"
 
 [dev-dependencies]
+async-std = { version = "1.12.0", features = ["attributes"] }
 ctor = "0.1.26"
 rstest = "0.16.0"
 tokio = { version = "1.26.0", features = ["io-std", "macros", "time"] }
